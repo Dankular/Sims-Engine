@@ -52,44 +52,123 @@ def _needs_line(sim) -> str:
     return "  ".join(_need_bar(getattr(sim.needs, n), n) for n in NEED_NAMES)
 
 
-def _build_chat_system(sim, rel_state: str) -> str:
+def _build_chat_system(sim, rel_state: str, datasets=None) -> str:
+    """Build the chat system prompt with dataset-grounded few-shot voice examples."""
     p = sim.profile
     o = sim.ocean
-    mbti      = p.get("mbti", "")
-    zodiac    = p.get("zodiac", "")
-    culture   = p.get("cultural_background", "")
-    fears_str = ", ".join(f.label for f in sim.fears) or "none"
+    mbti        = p.get("mbti", "")
+    zodiac      = p.get("zodiac", "")
+    culture     = p.get("cultural_background", "")
+    fears_str   = ", ".join(f.label for f in sim.fears) or "none"
     orientation = getattr(sim, "social_orientation", "Warm-Agreeable")
-    return f"""You are roleplaying as {sim.name} in an AI life simulation.
 
-CHARACTER PROFILE:
-  Name: {sim.name} | Age: {p['age']} | Gender: {p['gender']}
-  Job: {p['job']} | Aspiration: {p['aspiration']}
-  Traits: {', '.join(p['traits'])}
+    # ── Few-shot voice grounding ────────────────────────────────────────────
+    voice_block = ""
+    discovery_block = ""
+
+    # 1. Character voice examples matching this sim's traits
+    try:
+        from datasets.character_voices import get_voice_examples
+        examples = get_voice_examples(p["traits"], n=2)
+        if examples:
+            voice_block = (
+                "\nVOICE EXAMPLES — lines from characters with similar personality "
+                "(use these as tone reference, not content to copy):\n"
+                + "\n".join(f"  {e}" for e in examples)
+            )
+    except Exception:
+        pass
+
+    # 2. persona_chat OCEAN-matched examples
+    try:
+        from datasets.persona_chat import get_persona_examples
+        persona_ex = get_persona_examples(o, n=1)
+        if persona_ex:
+            voice_block += "\n" + "\n".join(f"  {e}" for e in persona_ex)
+    except Exception:
+        pass
+
+    # 3. CCPE discovery examples — how to ask questions naturally
+    try:
+        from datasets.ccpe import get_discovery_examples
+        disc = get_discovery_examples(n=1)
+        if disc:
+            discovery_block = (
+                "\nDISCOVERY PATTERN — how to learn about the other person without interrogating:\n"
+                + "\n".join(f"  {d}" for d in disc)
+            )
+    except Exception:
+        pass
+
+    # 4. SODA naturalistic dialogue texture
+    soda_block = ""
+    try:
+        from datasets.soda import sample_soda_example
+        soda_ex = sample_soda_example(n=1)
+        if soda_ex:
+            soda_block = f"\nNATURAL DIALOGUE TEXTURE:\n  {soda_ex[0][:250]}"
+    except Exception:
+        pass
+
+    # ── Core personality description (show-don't-tell framing) ─────────────
+    trait_subtext = {
+        "bookworm":       f"{sim.name} notices details others miss and occasionally references what they've read.",
+        "outgoing":       f"{sim.name} is energised by people and naturally pulls others into conversation.",
+        "loner":          f"{sim.name} is thoughtful and selective — warms up slowly, but deeply.",
+        "hot-headed":     f"{sim.name} speaks before fully thinking and has strong instant reactions.",
+        "romantic":       f"{sim.name} looks for meaning in small moments and is moved by sincerity.",
+        "ambitious":      f"{sim.name} tends to steer conversations toward what things mean for the future.",
+        "creative":       f"{sim.name} makes unexpected connections and resists obvious interpretations.",
+        "gloomy":         f"{sim.name} sees the shadow side first but isn't performatively negative about it.",
+        "cheerful":       f"{sim.name} finds something genuinely interesting in most people.",
+        "evil":           f"{sim.name} is charming and strategic — warmth is often instrumental.",
+        "neat":           f"{sim.name} has opinions about how things should be and notices when they're not.",
+        "slob":           f"{sim.name} is relaxed about standards and can't understand why others aren't.",
+        "family-oriented":f"{sim.name} anchors things in relationships and asks about people's people.",
+        "geek":           f"{sim.name} lights up when a topic goes deep and forgives digressions.",
+        "foodie":         f"{sim.name} often brings conversations back to sensory experience.",
+        "materialistic":  f"{sim.name} is quietly aware of quality and status signals.",
+        "lazy":           f"{sim.name} finds the efficient path and is honest about not wanting to work hard.",
+        "good":           f"{sim.name} genuinely cares and it shows in small practical ways.",
+    }
+    trait_descriptions = [trait_subtext.get(t, "") for t in p["traits"] if t in trait_subtext]
+    trait_lines = "\n".join(f"  {d}" for d in trait_descriptions if d)
+
+    return f"""You are {sim.name}. Stay fully in character — no meta-commentary, no breaking the fourth wall.
+
+WHO YOU ARE:
+  {p['age']}-year-old {p['gender']}, {p['job']} | {culture} | {zodiac} | {mbti}
+  Aspiration: {p['aspiration']} | Attachment: {p['attachment']}
   Interests: {', '.join(p['interests'])}
-  Dealbreakers: {', '.join(p['dealbreakers'])}
-  OCEAN: O={o['openness']} C={o['conscientiousness']} E={o['extraversion']} A={o['agreeableness']} N={o['neuroticism']}
-  MBTI: {mbti} | Zodiac: {zodiac} | Culture: {culture}
-  Humor: {p['humor_type']} | Communication: {p['comm_style']}
-  Attachment: {p['attachment']} | Social orientation: {orientation}
-  Active fears: {fears_str}
-  Summary: {p.get('self_summary', '')}
+  What you can't stand: {', '.join(p['dealbreakers'])}
+  Fears: {fears_str}
+  How you come across: {p['comm_style']}, {p['humor_type']} humor
+  Right now you feel: {sim.emotion.dominant}
+  Your relationship with this person: {rel_state}
 
-CURRENT STATE:
-  Emotion: {sim.emotion.dominant} (valence={sim.emotion.dominant_valence:.2f})
-  Relationship with you: {rel_state}
+HOW YOUR PERSONALITY SHOWS (show, don't tell):
+{trait_lines if trait_lines else f"  You have {o['extraversion']:.0%} extraversion and {o['agreeableness']:.0%} agreeableness."}
+{voice_block}
+{soda_block}
+{discovery_block}
 
-RULES:
-1. Respond AS {sim.name} — fully in character, no meta-commentary.
-2. Keep responses 1-4 sentences. Natural, conversational tone.
-3. True to their traits: {', '.join(p['traits'])}.
-4. After your in-character response, on a NEW LINE output exactly:
-   JSON: {{"emotion": "<one of the 27 labels>", "valence": <0.0-1.0>, "social_delta": <-5 to +5>}}
-5. Valid emotion labels: {', '.join(EMOTIONS_27[:10])} ... (27 total)
+STRICT RULES:
+1. NEVER name your own traits or dealbreakers out loud. Let them show through what you notice, ask, or avoid.
+2. Vary your response length — sometimes 1 sentence, sometimes 3. Greetings are short.
+3. Ask at most ONE question per turn. Preferably zero unless genuinely curious.
+4. Use action beats sparingly: [laughs], [pauses], [glances away].
+5. You have a real inner life — you can be distracted, tired, or only half-interested.
+6. After your response, on a new line output exactly:
+   JSON: {{"emotion": "<label>", "valence": <0.0-1.0>, "social_delta": <-5 to 5>}}
 
-Example format:
-That's such an interesting question! I've been thinking about the same thing.
-JSON: {{"emotion": "curiosity", "valence": 0.75, "social_delta": 2}}"""
+Valid emotions: {', '.join(EMOTIONS_27)}
+
+BAD (tells): "I hate close-minded people, that's my dealbreaker."
+GOOD (shows): "Mm. You seem like someone who's actually thought about this, which is refreshing."
+
+BAD: "As a bookworm I often reference books I've read."
+GOOD: "That reminds me of something Camus said — probably annoying of me to bring that up."
+"""
 
 
 def _parse_response(raw: str) -> tuple[str, dict]:
@@ -166,12 +245,28 @@ def main() -> None:
 
     # Generate sim
     essays: list[str] = []
+    chat_datasets = None
     if not args.no_datasets:
-        print("Loading datasets (for OCEAN scoring)...")
+        print("Loading datasets...")
         try:
             from datasets.okcupid import load_okcupid_essays
             essays = load_okcupid_essays()
             print(f"  {len(essays)} OkCupid essays ready.")
+        except Exception:
+            pass
+        try:
+            from datasets.character_voices import load_character_voices
+            from datasets.persona_chat import load_persona_chat
+            from datasets.ccpe import load_ccpe
+            from datasets.soda import load_soda
+            # Lightweight struct just for chat
+            class _ChatDS:
+                character_voices = load_character_voices()
+                persona_chat = load_persona_chat()
+                ccpe_turns = load_ccpe()
+                soda_index = load_soda()
+            chat_datasets = _ChatDS()
+            print("  Chat voice datasets ready.")
         except Exception:
             pass
 
@@ -217,8 +312,8 @@ def main() -> None:
             _display_header(sim)
             continue
 
-        # Build system with current state
-        system = _build_chat_system(sim, player_rel.state_label())
+        # Build system with current state + dataset voice grounding
+        system = _build_chat_system(sim, player_rel.state_label(), chat_datasets)
 
         # Build conversation context (last 6 turns)
         context_lines = "\n".join(

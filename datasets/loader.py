@@ -2,7 +2,11 @@ from dataclasses import dataclass, field
 import concurrent.futures
 
 from datasets.aita import load_aita_index
+from datasets.blended_skill import load_blended_skill
+from datasets.ccpe import load_ccpe
+from datasets.character_voices import load_character_voices
 from datasets.cooking import load_cooking_dialogs
+from datasets.soda import load_soda
 from datasets.fitness import load_fitness_content
 from datasets.group_scenes import load_group_scenes, load_group_triggers
 from datasets.health import load_health_symptoms
@@ -94,6 +98,11 @@ class DatasetRegistry:
     travel_content:         list[str]   = field(default_factory=list)
     nostalgia_templates:    list[str]   = field(default_factory=list)
     counsel_chat:           list[dict]  = field(default_factory=list)
+    # Dialogue variety / chat voice
+    soda_index:             dict        = field(default_factory=dict)
+    blended_skill:          dict        = field(default_factory=dict)
+    character_voices:       dict        = field(default_factory=dict)
+    ccpe_turns:             list[dict]  = field(default_factory=list)
 
     @classmethod
     def load(cls, workers: int = 4) -> "DatasetRegistry":
@@ -139,6 +148,10 @@ class DatasetRegistry:
             "travel_content":       load_travel_content,
             "nostalgia_templates":  load_nostalgia_templates,
             "counsel_chat":         load_counsel_chat,
+            "soda_index":           load_soda,
+            "blended_skill":        load_blended_skill,
+            "character_voices":     load_character_voices,
+            "ccpe_turns":           load_ccpe,
         }
         _list_keys = {
             "okcupid_essays", "social_norms", "dialogue_actions", "convai2_seeds",
@@ -147,6 +160,7 @@ class DatasetRegistry:
             "cooking_dialogs", "finance_questions",
             "group_scenes", "group_triggers", "health_symptoms",
             "travel_content", "nostalgia_templates", "counsel_chat",
+            "ccpe_turns",
         }
         results: dict[str, object] = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
@@ -195,6 +209,10 @@ class DatasetRegistry:
             travel_content=results["travel_content"],
             nostalgia_templates=results["nostalgia_templates"],
             counsel_chat=results["counsel_chat"],
+            soda_index=results["soda_index"],
+            blended_skill=results["blended_skill"],
+            character_voices=results["character_voices"],
+            ccpe_turns=results["ccpe_turns"],
         )
 
 

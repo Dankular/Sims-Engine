@@ -74,9 +74,31 @@ def choose_interaction(
             if dd_seed:
                 candidates.append((dd_seed, 0.92))
 
-        # Multi-character dialogue seed (8% chance, reduced since DailyDialog covers it)
-        elif random.random() < 0.08 and datasets.dialogue_actions:
-            candidates.append((random.choice(datasets.dialogue_actions), 0.90))
+        # SODA — naturalistic social dialogue seed (12% chance, high quality)
+        if random.random() < 0.12 and hasattr(datasets, "soda_index") and datasets.soda_index:
+            from datasets.soda import sample_soda_seed
+            soda_seed = sample_soda_seed(sim_a.emotion.dominant)
+            if soda_seed:
+                candidates.append((soda_seed, 0.93))
+
+        # blended_skill_talk — varied register seed (10% chance)
+        elif random.random() < 0.10 and hasattr(datasets, "blended_skill") and datasets.blended_skill:
+            from datasets.blended_skill import sample_blended_utterance
+            # Choose skill based on OCEAN
+            ocean = sim_a.ocean
+            if ocean["agreeableness"] > 0.6:
+                skill = "empathy"
+            elif ocean["openness"] > 0.6:
+                skill = "knowledge"
+            else:
+                skill = "persona"
+            utterance = sample_blended_utterance(skill)
+            if utterance:
+                candidates.append((utterance, 0.90))
+
+        # Multi-character dialogue seed (5% chance, lowest priority now)
+        elif random.random() < 0.05 and datasets.dialogue_actions:
+            candidates.append((random.choice(datasets.dialogue_actions), 0.88))
 
         # Moral dilemma — moral_stories (5% chance, high weight when triggered)
         if random.random() < 0.05 and datasets.moral_stories:
