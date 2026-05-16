@@ -23,8 +23,8 @@ HF_EMOTION_DATASET      = "dair-ai/emotion"
 HF_CONVAI2_DATASET      = "convai-challenge/conv_ai_2"
 
 # ── Cache / persistence paths ─────────────────────────────────────────────────
-CACHE_DIR   = Path(__file__).parent.parent / ".sim_cache"
-SIM_DB_PATH = str(Path(__file__).parent.parent / "sim_state.db")
+CACHE_DIR   = Path(__file__).parent / ".sim_cache"
+SIM_DB_PATH = str(Path(__file__).parent / "sim_state.db")
 
 # ── Simulation timing ─────────────────────────────────────────────────────────
 TICK_SECONDS   = 0.5

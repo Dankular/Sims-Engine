@@ -133,6 +133,7 @@ class OllamaBackend:
                 {"role": "user", "content": f"{user}\n/no_think"},
             ],
             "stream": False,
+            "think": False,
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
