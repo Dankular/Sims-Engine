@@ -1,0 +1,139 @@
+"""
+narrative/story_runner.py — Wires the event bus to story generation and TTS.
+
+Attach to a SimEngine via attach(engine, tts, llm). After every N ticks
+(or when a significant event fires), it collects events, generates a story
+script, and speaks it through the TTS engine.
+"""
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from engine.engine import SimEngine
+    from llm.backend import LLMBackend
+    from tts.engine import TTSEngine
+
+from narrative.story_writer import generate_story_script
+
+logger = logging.getLogger(__name__)
+
+
+class StoryRunner:
+    """
+    Collects simulation events and narrates them via TTS every `narrate_every` ticks.
+    """
+
+    def __init__(
+        self,
+        engine: "SimEngine",
+        tts: "TTSEngine",
+        llm: "LLMBackend",
+        narrate_every: int = 1,
+    ):
+        self._engine = engine
+        self._tts = tts
+        self._llm = llm
+        self._narrate_every = narrate_every
+        self._pending_events: list[dict] = []
+        self._last_narrated_tick = -1
+
+        # Subscribe to engine event bus
+        engine._bus.on("interaction_resolved", self._on_interaction)
+        engine._bus.on("career_event", self._on_career)
+        engine._bus.on("life_event", self._on_life)
+        engine._bus.on("tick_complete", self._on_tick_complete)
+
+    # ── Event collectors ──────────────────────────────────────────────────────
+
+    def _on_interaction(self, **kw):
+        result = kw.get("result", {})
+        self._pending_events.append({
+            "type": "interaction",
+            "sim_a": kw["sim_a"].name,
+            "sim_b": kw["sim_b"].name,
+            "action": "",  # filled below
+            "valence": float(kw.get("valence", 0)),
+            "memory": result.get("memory_tag", ""),
+            "reaction": result.get("sim_b_reaction", ""),
+            "reasoning": result.get("reasoning", ""),
+        })
+        # Backfill the action from pending (it was already popped by engine)
+        # Use interaction_id to match
+        iid = kw.get("interaction_id", "")
+        for item in self._engine._pending:
+            if item.interaction_id == iid:
+                self._pending_events[-1]["action"] = item.interaction
+                break
+
+    def _on_career(self, **kw):
+        result = kw.get("result", {})
+        self._pending_events.append({
+            "type": "career",
+            "sim": kw["sim"].name,
+            "event_type": result.get("event_type", ""),
+            "narrative": result.get("narrative", ""),
+            "performance_delta": result.get("performance_delta", 0),
+            "simoleon_delta": result.get("simoleon_delta", 0),
+        })
+
+    def _on_life(self, **kw):
+        result = kw.get("result", {})
+        self._pending_events.append({
+            "type": "life",
+            "event_type": result.get("event_type", "life event"),
+            "narrative": result.get("narrative", ""),
+        })
+
+    # ── Narration trigger ─────────────────────────────────────────────────────
+
+    def _on_tick_complete(self, **kw):
+        tick = kw.get("tick", 0)
+        if not self._pending_events:
+            return
+        if (tick - self._last_narrated_tick) < self._narrate_every:
+            return
+
+        self._last_narrated_tick = tick
+        events = list(self._pending_events)
+        self._pending_events.clear()
+
+        # Build slim sim profile list for context
+        sim_profiles = [
+            {
+                "name": s.name,
+                "job": s.profile["job"],
+                "traits": s.profile["traits"],
+                "aspiration": s.profile["aspiration"],
+                "emotion": s.emotion.dominant,
+            }
+            for s in self._engine.sims
+        ]
+
+        print(f"\n  📖 Narrating tick {tick}...")
+        segments = generate_story_script(self._llm, events, sim_profiles, tick)
+        if not segments:
+            print("  [Story] No script generated.")
+            return
+
+        # Print script to terminal
+        for seg in segments:
+            speaker = seg["speaker"]
+            text = seg["text"]
+            tag = "📣" if speaker.lower() == "narrator" else f"💬 {speaker}"
+            print(f"  {tag}: {text}")
+
+        # Speak it
+        self._tts.speak_script(segments, tick=tick)
+
+
+def attach(
+    engine: "SimEngine",
+    tts: "TTSEngine",
+    llm: "LLMBackend",
+    narrate_every: int = 1,
+) -> StoryRunner:
+    """Attach a StoryRunner to the engine and return it."""
+    runner = StoryRunner(engine, tts, llm, narrate_every=narrate_every)
+    return runner

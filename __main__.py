@@ -51,6 +51,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--llama-model", default=None, help="Model id sent to llama-server")
     p.add_argument("--llm-timeout", type=int, default=240, help="LLM request timeout (default: 240)")
     p.add_argument("--no-datasets", action="store_true", help="Skip dataset loading")
+    p.add_argument("--story", action="store_true", help="Enable story narration + TTS after each tick")
+    p.add_argument("--narrate-every", type=int, default=1, help="Narrate every N ticks (default: 1)")
+    p.add_argument("--tts-quality", type=int, default=8, help="TTS quality steps 5-12 (default: 8)")
+    p.add_argument("--tts-speed", type=float, default=1.0, help="TTS speed 0.7-2.0 (default: 1.0)")
+    p.add_argument("--no-audio-save", action="store_true", help="Don't save audio files to disk")
     return p
 
 
@@ -138,6 +143,19 @@ def main() -> None:
     engine = SimEngine(sims=sims, llm=llm, datasets=datasets, db=db)
     engine.households = households
     attach(engine)
+
+    # Story mode — TTS narration
+    if args.story:
+        from tts.engine import TTSEngine
+        from narrative.story_runner import attach as attach_story
+        tts = TTSEngine(
+            quality=args.tts_quality,
+            speed=args.tts_speed,
+            save_audio=not args.no_audio_save,
+        )
+        tts.assign_voices([s.name for s in sims])
+        attach_story(engine, tts, llm, narrate_every=args.narrate_every)
+        print(f"[INFO] Story mode ON — TTS narration every {args.narrate_every} tick(s)\n")
 
     print(f"\n[INFO] Starting simulation — {args.ticks} ticks\n")
     try:
