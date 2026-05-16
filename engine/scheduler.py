@@ -200,6 +200,68 @@ def choose_interaction(
                 if manip:
                     candidates.append((format_manipulation_interaction(manip), 1.6))
 
+        # Gap 1: Fitness — skill-gated (8% when fitness >= 1)
+        fitness_skill = sim_a.skills.levels.get("fitness", 0)
+        if random.random() < 0.08 and fitness_skill >= 1:
+            if hasattr(datasets, "fitness_content") and datasets.fitness_content:
+                from datasets.fitness import sample_fitness_content, format_fitness_interaction
+                item = sample_fitness_content(fitness_skill)
+                if item:
+                    fitness_b = sim_b.skills.levels.get("fitness", 0)
+                    candidates.append((
+                        format_fitness_interaction(item, fitness_skill, fitness_b),
+                        1.0 + fitness_skill * 0.08,
+                    ))
+
+        # Travel interest — 15% when sim_a has "travel" interest
+        if ("travel" in sim_a.profile.get("interests", [])
+                and random.random() < 0.15
+                and hasattr(datasets, "travel_content")
+                and datasets.travel_content):
+            from datasets.travel import sample_travel_seed, format_travel_interaction
+            seed = sample_travel_seed()
+            if seed:
+                both = "travel" in sim_b.profile.get("interests", [])
+                candidates.append((format_travel_interaction(seed, both),
+                                   1.6 if both else 1.0))
+
+        # Reminisce — unlocked at friendship >= 65 AND memories >= 5
+        if friendship_score >= 65 and datasets is not None:
+            rel_obj = None
+            try:
+                from engine.scheduler import pick_interaction_pair  # avoid circular
+            except Exception:
+                pass
+            # We don't have the rel here directly, but we can check via a helper
+            if hasattr(datasets, "nostalgia_templates"):
+                from datasets.nostalgia import (
+                    REMINISCE_FRIENDSHIP_MIN, REMINISCE_MEMORY_MIN,
+                    sample_reminisce_template, format_reminisce_interaction,
+                )
+                if friendship_score >= REMINISCE_FRIENDSHIP_MIN and random.random() < 0.10:
+                    template = sample_reminisce_template()
+                    # shared memories will be filled by engine; pass empty for now
+                    candidates.append((
+                        format_reminisce_interaction(template, []),
+                        2.2,   # highest weight — strongest bonding action
+                    ))
+
+        # Reconciliation — post-toxic cycle (8% chance when applicable)
+        if (hasattr(datasets, "counsel_chat") and datasets.counsel_chat
+                and random.random() < 0.08):
+            from datasets.reconciliation import (
+                sample_counsel_exchange, format_reconciliation_interaction,
+                RECONCILIATION_FRIENDSHIP_MIN, RECONCILIATION_FRIENDSHIP_MAX,
+            )
+            if RECONCILIATION_FRIENDSHIP_MIN <= friendship_score <= RECONCILIATION_FRIENDSHIP_MAX:
+                exchange = sample_counsel_exchange()
+                candidates.append((
+                    format_reconciliation_interaction(
+                        exchange, sim_a.name, sim_b.name, friendship_score
+                    ),
+                    1.8,
+                ))
+
         # Gap 6: Financial stress seeds (10% when simoleons < threshold)
         from config import LOW_FUNDS_THRESHOLD
         if (sim_a.simoleons < LOW_FUNDS_THRESHOLD

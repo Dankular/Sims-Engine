@@ -58,6 +58,8 @@ class Sim:
         self.ei_reputation: float = 0.0      # -50..50
         # Creative reputation (Gap 3)
         self.creative_reputation: float = 0.0  # 0..100
+        # Health scare tracking
+        self._low_energy_ticks: int = 0
 
     @property
     def ocean(self) -> dict:
@@ -120,6 +122,13 @@ class Sim:
         self.career_performance = max(
             0, min(100, self.career_performance + random.uniform(-1, 1) + mood_mod)
         )
+
+        # Health scare counter
+        from datasets.health import HEALTH_SCARE_ENERGY_THRESHOLD
+        if self.needs.energy < HEALTH_SCARE_ENERGY_THRESHOLD:
+            self._low_energy_ticks += 1
+        else:
+            self._low_energy_ticks = 0
 
         self.economy_tick(getattr(self, "_current_tick", 0))
 

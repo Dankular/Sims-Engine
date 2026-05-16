@@ -156,6 +156,22 @@ class SimEngine:
         if self._tick_count % CAREER_EVENT_INTERVAL == 0 and random.random() < CAREER_EVENT_CHANCE:
             self._run_career_event(random.choice(self.sims))
 
+        # Health scare life events — triggered by chronic low energy
+        from datasets.health import HEALTH_SCARE_TICK_COUNT
+        for sim in self.sims:
+            if getattr(sim, "_low_energy_ticks", 0) >= HEALTH_SCARE_TICK_COUNT:
+                sim._low_energy_ticks = 0   # reset counter
+                self._run_life_event(
+                    sim, None,
+                    event_type="health_scare",
+                    context=None,
+                )
+                break   # one health scare per tick
+
+        # Group event — high-crowd venue with 3+ ACTIVE sims
+        if self._tick_count % 3 == 0:
+            self._maybe_run_group_event(active)
+
         # Life events — milestone-based first, random fallback
         if self._tick_count % LIFE_EVENT_INTERVAL == 0 and random.random() < LIFE_EVENT_CHANCE:
             self._check_life_events()
@@ -762,6 +778,14 @@ class SimEngine:
                     pool.extend(["rivalry_escalation"] * 2)
             event_type = random.choice(pool)
 
+        # Health scare: use symptom context
+        if event_type == "health_scare" and context is None:
+            try:
+                from datasets.health import health_scare_context
+                context = health_scare_context(sim_a)
+            except Exception:
+                pass
+
         # Financial crisis: use FiQA context
         if event_type == "financial_crisis" and context is None:
             try:
@@ -821,6 +845,37 @@ class SimEngine:
             )
         except Exception as exc:
             logger.warning("Life event failed: %s", exc)
+
+    def _maybe_run_group_event(self, active_sims: list[Sim]) -> None:
+        """Fire a group event if venue is crowded and 3+ active sims present."""
+        if len(active_sims) < 3:
+            return
+        crowd = self._venue.get("crowd", 0)
+        if crowd < 0.7:
+            return
+        if random.random() > 0.25:   # 25% chance per eligible tick
+            return
+        if not (self._datasets and hasattr(self._datasets, "group_scenes")
+                and self._datasets.group_scenes):
+            return
+        try:
+            from datasets.group_scenes import (
+                sample_group_scene, sample_trigger, format_group_interaction,
+            )
+            scene = sample_group_scene()
+            trigger = sample_trigger()
+            if not scene:
+                return
+            participants = random.sample(active_sims, min(3, len(active_sims)))
+            sim_names = [s.name for s in participants]
+            interaction = format_group_interaction(scene, sim_names, trigger)
+            initiator = participants[0]
+            target = participants[1]
+            self._submit_interaction(initiator, target, interaction, self._venue)
+            logger.info("[GROUP] %s + %d witnesses at %s",
+                        initiator.name, len(participants) - 1, self._venue["name"])
+        except Exception as exc:
+            logger.debug("Group event failed: %s", exc)
 
     def _on_tick_complete(self, **_: Any) -> None:
         pass

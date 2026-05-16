@@ -3,6 +3,12 @@ import concurrent.futures
 
 from datasets.aita import load_aita_index
 from datasets.cooking import load_cooking_dialogs
+from datasets.fitness import load_fitness_content
+from datasets.group_scenes import load_group_scenes, load_group_triggers
+from datasets.health import load_health_symptoms
+from datasets.nostalgia import load_nostalgia_templates
+from datasets.reconciliation import load_counsel_chat
+from datasets.travel import load_travel_content
 from datasets.creative_works import load_creative_works
 from datasets.culture import load_culture_index
 from datasets.debate import load_debate_index
@@ -80,6 +86,14 @@ class DatasetRegistry:
     manipulation_index:     dict        = field(default_factory=dict)   # Gap 4: Toxic
     culture_index:          dict        = field(default_factory=dict)   # Gap 5: Culture
     finance_questions:      list[str]   = field(default_factory=list)   # Gap 6: Finance
+    # New gaps
+    fitness_content:        dict        = field(default_factory=dict)
+    group_scenes:           list[dict]  = field(default_factory=list)
+    group_triggers:         list[str]   = field(default_factory=list)
+    health_symptoms:        list[dict]  = field(default_factory=list)
+    travel_content:         list[str]   = field(default_factory=list)
+    nostalgia_templates:    list[str]   = field(default_factory=list)
+    counsel_chat:           list[dict]  = field(default_factory=list)
 
     @classmethod
     def load(cls, workers: int = 4) -> "DatasetRegistry":
@@ -118,12 +132,21 @@ class DatasetRegistry:
             "manipulation_index":   load_manipulation_index,
             "culture_index":        load_culture_index,
             "finance_questions":    load_finance_questions,
+            "fitness_content":      load_fitness_content,
+            "group_scenes":         load_group_scenes,
+            "group_triggers":       load_group_triggers,
+            "health_symptoms":      load_health_symptoms,
+            "travel_content":       load_travel_content,
+            "nostalgia_templates":  load_nostalgia_templates,
+            "counsel_chat":         load_counsel_chat,
         }
         _list_keys = {
             "okcupid_essays", "social_norms", "dialogue_actions", "convai2_seeds",
             "moral_stories", "moral_choice", "persona_chat", "social_bias_norms",
             "dadjokes", "persuasion_args", "ei_scenarios",
             "cooking_dialogs", "finance_questions",
+            "group_scenes", "group_triggers", "health_symptoms",
+            "travel_content", "nostalgia_templates", "counsel_chat",
         }
         results: dict[str, object] = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
@@ -165,6 +188,13 @@ class DatasetRegistry:
             manipulation_index=results["manipulation_index"],
             culture_index=results["culture_index"],
             finance_questions=results["finance_questions"],
+            fitness_content=results["fitness_content"],
+            group_scenes=results["group_scenes"],
+            group_triggers=results["group_triggers"],
+            health_symptoms=results["health_symptoms"],
+            travel_content=results["travel_content"],
+            nostalgia_templates=results["nostalgia_templates"],
+            counsel_chat=results["counsel_chat"],
         )
 
 
