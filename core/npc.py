@@ -67,6 +67,27 @@ class NPCManager:
             friendliness=random.uniform(0.3, 0.9),
         )
 
+    def generate_dialogue(self, npc: NPC, sim: "Sim", bg_llm=None) -> str | None:
+        """
+        System 8 — Generate a brief NPC greeting/line using Ministral-3B.
+        Falls back to a static line if bg_llm is unavailable.
+        """
+        if bg_llm is None:
+            return None
+        try:
+            system = (
+                f"You are {npc.name}, a background character in a life simulation. "
+                f"Profile: {npc.profile_text[:120]} "
+                f"Deliver one short, in-character line (max 25 words) to greet {sim.name}."
+            )
+            user = f"{sim.name} looks at you. Say something natural."
+            response = bg_llm.chat(system=system, user=user)
+            # Strip quotes and truncate
+            line = response.strip().strip('"\'').split("\n")[0][:150]
+            return line if line else None
+        except Exception:
+            return None
+
     def heuristic_interact(
         self,
         sim: "Sim",

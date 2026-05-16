@@ -55,6 +55,44 @@ def load_conformity_examples() -> list[dict]:
     return examples
 
 
+def compute_conformity_pressure_model(
+    sims: list, venue_name: str = "social gathering"
+) -> dict[str, float]:
+    """
+    System 9 — Reward-model-based conformity pressure.
+    Scores how "socially expected" independent action is for each Sim given
+    the group context.  Higher reward score → stronger conformity pull.
+    Falls back to heuristic if model unavailable.
+    """
+    try:
+        from llm.small_models import get_reward
+        rm = get_reward()
+        if rm is None:
+            return {}
+        pressures: dict[str, float] = {}
+        for sim in sims:
+            context = (
+                f"At a {venue_name}, {sim.name} considers acting independently "
+                f"against group norms. Traits: {', '.join(sim.profile.get('traits', [])[:3])}. "
+                f"Agreeableness: {sim.ocean.get('agreeableness', 0.5):.2f}."
+            )
+            try:
+                result = rm(context[:512])
+                # Reward models return LABEL_1 for high-reward (conforming) actions
+                score = float(result[0]["score"])
+                label = result[0]["label"].upper()
+                # LABEL_1 = high reward = high conformity; LABEL_0 = low reward
+                if "1" in label:
+                    pressures[sim.sim_id] = round(min(1.0, score * 0.9), 2)
+                else:
+                    pressures[sim.sim_id] = round(max(0.0, (1.0 - score) * 0.5), 2)
+            except Exception:
+                pass
+        return pressures
+    except Exception:
+        return {}
+
+
 def compute_conformity_pressure(sims: list, trait: str | None = None) -> dict[str, float]:
     """
     Given a list of Sim objects in a group event, compute conformity pressure

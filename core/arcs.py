@@ -137,10 +137,63 @@ def burnout_tick(sim: "Sim") -> None:
 
 
 def should_trigger_burnout(sim: "Sim") -> bool:
-    return (
+    """
+    System 10 — Detect burnout via NLI when threshold is close;
+    fall back to tick counter for clear-cut cases.
+    """
+    counter_triggered = (
         getattr(sim, "_high_perf_low_energy_ticks", 0) >= BURNOUT_TRIGGER_TICKS
         and not getattr(sim, "_burnout_active", False)
     )
+    if counter_triggered:
+        return True
+
+    # Near-threshold: NLI state description for nuanced detection
+    ticks = getattr(sim, "_high_perf_low_energy_ticks", 0)
+    if ticks < BURNOUT_TRIGGER_TICKS // 2 or getattr(sim, "_burnout_active", False):
+        return False
+    try:
+        from llm.small_models import zero_shot_classify
+        state = (
+            f"Sim career_performance={sim.career_performance:.0f}, "
+            f"energy={sim.needs.energy:.0f}, fun={sim.needs.fun:.0f}, "
+            f"emotion={sim.emotion.dominant}, "
+            f"high_perf_low_energy_streak={ticks}_ticks"
+        )
+        result = zero_shot_classify(
+            state,
+            ["experiencing burnout from overwork", "energised and performing well"],
+            threshold=0.65,
+        )
+        return result is not None and "burnout" in result[0]
+    except Exception:
+        return False
+
+
+def is_lonely_nli(sim: "Sim") -> bool:
+    """
+    System 10 — NLI-augmented loneliness detection for near-threshold states.
+    Supplements the tick counter in is_lonely().
+    """
+    if is_lonely(sim):
+        return True
+    drought = getattr(sim, "_social_drought_ticks", 0)
+    if drought < LONELINESS_THRESHOLD // 2:
+        return False
+    try:
+        from llm.small_models import zero_shot_classify
+        state = (
+            f"Sim has had no social interaction for {drought} ticks. "
+            f"Social need={sim.needs.social:.0f}/100, emotion={sim.emotion.dominant}."
+        )
+        result = zero_shot_classify(
+            state,
+            ["feeling lonely and socially isolated", "socially fulfilled"],
+            threshold=0.62,
+        )
+        return result is not None and "lonely" in result[0]
+    except Exception:
+        return False
 
 
 def apply_burnout(sim: "Sim") -> None:

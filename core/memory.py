@@ -68,6 +68,25 @@ def _cosine_top_k(query_vec, memories: list[dict], top_k: int) -> list[dict]:
         return memories[-top_k:]
 
 
+def _cross_encoder_rerank(query: str, candidates: list[dict], top_k: int) -> list[dict]:
+    """
+    System 6 — Cross-encoder memory reranking.
+    Re-scores (query, memory_text) pairs with ms-marco-MiniLM for higher
+    contextual precision than bi-encoder cosine alone.
+    """
+    try:
+        from llm.small_models import get_cross_encoder
+        ce = get_cross_encoder()
+        if ce is None or not candidates:
+            return candidates[:top_k]
+        pairs = [(query, m.get("text", "")[:256]) for m in candidates]
+        scores = ce.predict(pairs, show_progress_bar=False)
+        ranked = sorted(zip(scores, candidates), key=lambda x: x[0], reverse=True)
+        return [m for _, m in ranked[:top_k]]
+    except Exception:
+        return candidates[:top_k]
+
+
 def _embed(text: str) -> list[float] | None:
     model = _get_sbert()
     if model is None:
@@ -206,15 +225,28 @@ class MemoryStore:
         query: str,
         top_k: int = 3,
     ) -> list[dict]:
-        """Return the top-k most semantically relevant memory dicts for a pair."""
+        """
+        Return the top-k most contextually relevant memory dicts for a pair.
+        Pipeline: SBERT bi-encoder retrieves top-20 candidates →
+        cross-encoder (ms-marco-MiniLM) reranks → return top-k.
+        """
         key = f"{min(sim_a, sim_b)}_{max(sim_a, sim_b)}"
         memories = self._store.get(key, [])
         if not memories:
             return []
+
+        # Stage 1: fast bi-encoder retrieval (top-20 candidates)
         q_emb = _embed(query)
         if q_emb is None:
-            return memories[-top_k:]
-        return _cosine_top_k(q_emb, memories, top_k)
+            candidates = memories[-20:]
+        else:
+            candidates = _cosine_top_k(q_emb, memories, min(20, len(memories)))
+
+        if len(candidates) <= top_k:
+            return candidates
+
+        # Stage 2: cross-encoder reranking for precision
+        return _cross_encoder_rerank(query, candidates, top_k)
 
     def write_long_term(
         self,

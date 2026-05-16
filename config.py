@@ -12,6 +12,15 @@ GGUF_GPU_LAYERS = -1  # -1 = all layers on GPU; 0 = CPU-only
 GGUF_N_THREADS = None  # None = auto
 
 # ── HuggingFace model/dataset IDs ─────────────────────────────────────────────
+# Small inference models (lazy-loaded, CPU-only, all have hardcoded fallbacks)
+NLI_SMALL_MODEL      = "cross-encoder/nli-deberta-v3-small"       # 85 MB  — scheduler + arc detection
+GOAL_NLI_MODEL       = "typeform/distilbert-base-uncased-mnli"    # 67 MB  — goal inference
+SENTIMENT_MODEL      = "cardiffnlp/twitter-roberta-base-sentiment-latest"  # 125 MB — delta modulation
+EKMAN_MODEL          = "j-hartmann/emotion-english-distilroberta-base"     # 83 MB  — emotional cascade
+CROSS_ENCODER_MODEL  = "cross-encoder/ms-marco-MiniLM-L-6-v2"    # 85 MB  — memory reranking
+COMET_MODEL          = "allenai/comet-distil"                      # 250 MB — ATOMIC causal inference
+REWARD_MODEL         = "OpenAssistant/reward-model-deberta-v3-large-v2"   # 400 MB — conformity pressure
+
 # Memory embeddings — static-retrieval-mrl is 100-400× faster on CPU
 HF_SENTENCE_MODEL = "sentence-transformers/static-retrieval-mrl-en-v1"
 HF_SENTENCE_MODEL_FULL = (

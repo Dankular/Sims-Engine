@@ -471,6 +471,31 @@ class SimEngine:
         rel = self.relationships.get(sim_a.sim_id, sim_b.sim_id)
         fd = float(result.get("friendship_delta", 0))
         rd = float(result.get("romance_delta", 0))
+
+        # System 2: Sentiment-modulated deltas — graded outcomes from reaction text
+        try:
+            from llm.small_models import get_sentiment, get_ekman, sentiment_to_modifier
+            reaction_text = result.get("sim_b_reaction", "")
+            if reaction_text:
+                sent_pipe = get_sentiment()
+                if sent_pipe is not None:
+                    sent_result = sent_pipe(reaction_text[:512])
+                    mod = sentiment_to_modifier(sent_result)
+                    fd = round(fd * mod, 2)
+                    rd = round(rd * mod, 2)
+                # Ekman "surprise" bonus: unexpected kindness hits harder
+                ekman_pipe = get_ekman()
+                if ekman_pipe is not None and fd > 0:
+                    ekman_result = ekman_pipe(reaction_text[:512])
+                    labels = ekman_result[0] if isinstance(ekman_result[0], list) else ekman_result
+                    surprise_score = next(
+                        (r["score"] for r in labels if r["label"].lower() == "surprise"), 0.0
+                    )
+                    if surprise_score > 0.4:
+                        fd = round(fd * (1.0 + surprise_score * 0.3), 2)
+        except Exception:
+            pass
+
         rel.apply_deltas(fd, rd)
 
         valence = float(result.get("valence", 0.5))
@@ -492,20 +517,29 @@ class SimEngine:
         if result.get("comedy_xp_a"):
             sim_a.skills.gain_xp("comedy", float(result["comedy_xp_a"]))
 
-        # Emotion classifier — augment LLM emotions with ModernBERT GoEmotions tags
+        # System 5: GoEmotions as PRIMARY emotional cascade
         memory_tag = result.get("memory_tag", item.interaction)
         reaction_text = result.get("sim_b_reaction", "")
         try:
-            from identity.emotion_classifier import augment_emotions
+            from identity.emotion_classifier import classify
 
-            for sim, text, base_emo in [
+            for sim, text, llm_emo in [
                 (sim_a, memory_tag, emo_a),
                 (sim_b, reaction_text, emo_b),
             ]:
-                extra = augment_emotions(base_emo, text)
-                for extra_emo in extra[:1]:  # add at most 1 extra emotion per sim
-                    sim.emotion.add(extra_emo, 0.4, duration=3, source="classifier")
+                if not text.strip():
+                    continue
+                classified = classify(text, threshold=0.30, top_k=2)
+                if classified:
+                    # Primary emotion from classifier (higher confidence than LLM alone)
+                    sim.emotion.add(classified[0], 0.75, duration=4, source="goemo_primary")
+                    if len(classified) > 1:
+                        sim.emotion.add(classified[1], 0.35, duration=2, source="goemo_secondary")
+                elif llm_emo:
+                    # Fallback: use LLM emotion if classifier has nothing
+                    sim.emotion.add(llm_emo, 0.7, duration=4, source="life event")
         except Exception:
+            # Hard fallback: original LLM emotions applied above are sufficient
             pass
 
         memory_tag = result.get("memory_tag", item.interaction)
@@ -1282,12 +1316,15 @@ class SimEngine:
                                 child.name, sim_b.name,
                             )
 
-            # System 4: set intent goal toward closest friend after notable life events
+            # System 4: NLI-inferred goal toward closest friend after notable life events
             try:
                 from core.goals import set_goal_from_life_event
                 closest_id = self._find_closest_friend_id(sim_a)
                 if closest_id:
-                    set_goal_from_life_event(sim_a, event_type, closest_id, self._tick_count)
+                    set_goal_from_life_event(
+                        sim_a, event_type, closest_id, self._tick_count,
+                        narrative=narrative,  # pass narrative for NLI inference
+                    )
             except Exception:
                 pass
 
@@ -1323,15 +1360,23 @@ class SimEngine:
             participants = random.sample(active_sims, min(3, len(active_sims)))
             sim_names = [s.name for s in participants]
 
-            # Peer pressure — check conformity pressure and optionally seed narrative
+            # System 9: Peer pressure — reward-model conformity, then heuristic fallback
             try:
-                from datasets.social_conformity import compute_conformity_pressure, sample_herding_seed
-                pressures = compute_conformity_pressure(participants, "agreeableness")
-                max_pressure_id = max(pressures, key=pressures.get)
-                if pressures[max_pressure_id] > 0.6:
-                    herding = sample_herding_seed()
-                    if herding:
-                        trigger = f"{trigger} [peer pressure: {herding[:100]}]"
+                from datasets.social_conformity import (
+                    compute_conformity_pressure_model,
+                    compute_conformity_pressure,
+                    sample_herding_seed,
+                )
+                venue_name = self._venue.get("name", "social gathering")
+                pressures = compute_conformity_pressure_model(participants, venue_name)
+                if not pressures:
+                    pressures = compute_conformity_pressure(participants, "agreeableness")
+                if pressures:
+                    max_pressure_id = max(pressures, key=pressures.get)
+                    if pressures[max_pressure_id] > 0.6:
+                        herding = sample_herding_seed()
+                        if herding:
+                            trigger = f"{trigger} [peer pressure: {herding[:100]}]"
             except Exception:
                 pass
 
@@ -1364,19 +1409,24 @@ class SimEngine:
         return best_id
 
     def _maybe_run_npc_encounter(self, sim: Sim) -> None:
-        """Gap 6: Spawn a one-shot ambient NPC encounter at a crowded venue."""
+        """Gap 6 + System 8: Ambient NPC encounter with bg-LLM-generated dialogue."""
         try:
             from core.npc import NPCManager
             if not hasattr(self, "_npc_manager"):
                 self._npc_manager = NPCManager()
             npc = self._npc_manager.spawn()
+            # System 8: generate dialogue via Ministral-3B background LLM
+            dialogue = self._npc_manager.generate_dialogue(npc, sim, self._bg_llm)
             outcome = self._npc_manager.heuristic_interact(sim, npc, self.relationships)
+            if dialogue:
+                outcome["memory_tag"] = f"met {npc.name}: '{dialogue[:60]}'"
             self.memory_store.write(
                 sim.sim_id, npc.npc_id,
                 outcome["memory_tag"], outcome["valence"], tick=self._tick_count,
             )
             logger.info(
-                "[NPC] %s met %s (valence=%.2f)", sim.name, npc.name, outcome["valence"]
+                "[NPC] %s met %s → '%s' (valence=%.2f)",
+                sim.name, npc.name, dialogue[:40] if dialogue else "", outcome["valence"]
             )
         except Exception as exc:
             logger.debug("NPC encounter failed: %s", exc)

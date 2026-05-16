@@ -59,16 +59,58 @@ def goal_to_interaction(goal: SimGoal) -> str:
     return ACTION_TYPE_INTERACTION.get(goal.action_type, f"[GOAL: {goal.action_type}]")
 
 
+# NLI goal-inference labels → action_type mapping
+_NLI_GOAL_LABELS: dict[str, str] = {
+    "seek emotional comfort from a friend":    "seek_comfort",
+    "seek financial help or advice":           "seek_comfort",
+    "recover from career setback":             "celebrate",
+    "celebrate good news with someone":        "celebrate",
+    "confide a personal secret or worry":      "confide",
+    "apologise for past behaviour":            "apologise",
+    "withdraw from social contact":            "confide",
+    "express love or gratitude":               "express_love",
+}
+_NLI_GOAL_LABEL_LIST = list(_NLI_GOAL_LABELS.keys())
+
+
+def _infer_action_from_narrative(event_type: str, narrative: str) -> str | None:
+    """System 4 — Use NLI to infer goal type from life-event narrative text."""
+    try:
+        from llm.small_models import zero_shot_classify, get_goal_nli
+        clf = get_goal_nli()
+        if clf is None:
+            return None
+        text = f"{event_type}: {narrative}"
+        result = zero_shot_classify(text, _NLI_GOAL_LABEL_LIST, pipeline=clf, threshold=0.35)
+        if result:
+            return _NLI_GOAL_LABELS.get(result[0])
+    except Exception:
+        pass
+    return None
+
+
 def set_goal_from_life_event(
     sim: "Sim",
     event_type: str,
     target_id: str,
     current_tick: int,
+    narrative: str = "",
 ) -> None:
     """Assign an intent goal after a life event fires."""
-    if event_type not in _LIFE_EVENT_GOAL_MAP:
-        return
-    action, urgency, duration = _LIFE_EVENT_GOAL_MAP[event_type]
+    # System 4: try NLI inference first; fall back to hardcoded map
+    action = None
+    if narrative:
+        action = _infer_action_from_narrative(event_type, narrative)
+
+    if action is None:
+        if event_type not in _LIFE_EVENT_GOAL_MAP:
+            return
+        action, urgency, duration = _LIFE_EVENT_GOAL_MAP[event_type]
+    else:
+        _, urgency, duration = _LIFE_EVENT_GOAL_MAP.get(
+            event_type, ("seek_comfort", 0.7, 10)
+        )
+
     sim._active_goal = SimGoal(
         action_type=action,
         target_sim=target_id,

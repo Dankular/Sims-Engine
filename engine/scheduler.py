@@ -8,6 +8,69 @@ if TYPE_CHECKING:
     from core.relationships import RelationshipGraph, RelationshipRecord
     from datasets.loader import DatasetRegistry
 
+# Pre-build reverse mapping: action → category, for NLI weight boosting
+_ACTION_TO_CATEGORY: dict[str, str] = {}
+for _cat, _actions in INTERACTION_TYPES.items():
+    for _a in _actions:
+        _ACTION_TO_CATEGORY[_a] = _cat
+
+# NLI label → INTERACTION_TYPES category
+_NLI_LABEL_TO_CAT: dict[str, str] = {
+    "deep emotional conversation about feelings or fears": "deep",
+    "romantic or flirtatious interaction":                 "romantic",
+    "playful funny casual interaction":                    "funny",
+    "hostile argumentative confrontation":                 "mean",
+    "casual friendly conversation":                        "friendly",
+}
+_NLI_INTERACTION_LABELS = list(_NLI_LABEL_TO_CAT.keys())
+
+
+def _nli_boost_candidates(
+    sim_a: "Sim",
+    sim_b: "Sim",
+    rel: "RelationshipRecord",
+    candidates: list[tuple[str, float]],
+) -> list[tuple[str, float]]:
+    """
+    System 1 — Scheduler NLI routing.
+    Classifies the Sim-pair state into an interaction category and boosts
+    matching candidate weights by 2×.  Falls back to unchanged list.
+    """
+    try:
+        from llm.small_models import zero_shot_classify
+        from core.arcs import is_lonely
+
+        parts = [f"{sim_a.name}: emotion={sim_a.emotion.dominant}"]
+        if sim_a.grief_stage >= 0:
+            parts.append(f"grief_stage={sim_a.grief_stage}")
+        if is_lonely(sim_a):
+            parts.append("socially_isolated")
+        if getattr(sim_a, "_burnout_active", False):
+            parts.append("burnt_out")
+
+        state = (
+            f"{', '.join(parts)}. "
+            f"{sim_b.name}: emotion={sim_b.emotion.dominant}. "
+            f"Relationship: {rel.state_label()}, "
+            f"friendship={rel.friendship:.0f}, romance={rel.romance:.0f}."
+        )
+
+        result = zero_shot_classify(state, _NLI_INTERACTION_LABELS, threshold=0.38)
+        if result is None:
+            return candidates
+
+        predicted_cat = _NLI_LABEL_TO_CAT.get(result[0], "")
+        if not predicted_cat:
+            return candidates
+
+        boosted_actions = set(INTERACTION_TYPES.get(predicted_cat, []))
+        return [
+            (action, weight * 2.0 if action in boosted_actions else weight)
+            for action, weight in candidates
+        ]
+    except Exception:
+        return candidates
+
 
 def choose_interaction(
     sim_a: "Sim",
@@ -626,6 +689,10 @@ def choose_interaction(
     if not candidates:
         sim_a._action_cooldowns.clear()
         return "say hello"
+
+    # System 1: NLI-based category boosting — emergent routing from Sim state
+    candidates = _nli_boost_candidates(sim_a, sim_b, relationship, candidates)
+
     actions, weights = zip(*candidates)
     return random.choices(actions, weights=weights, k=1)[0]
 

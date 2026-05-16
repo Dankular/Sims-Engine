@@ -76,6 +76,9 @@ def consolidate_memories(
     # Gap 2 — memory valence → OCEAN drift
     _apply_valence_ocean_drift(sim, all_memories)
 
+    # System 3 — KevSun/Personality_LM prediction from consolidated memory text
+    _apply_personality_lm_drift(sim, memory_store)
+
     sim._last_consolidation_tick = tick
     logger.debug("[CONSOLIDATION] %s: %d memories → long-term", sim.name, len(top))
     return consolidated
@@ -128,3 +131,45 @@ def _apply_valence_ocean_drift(sim: "Sim", memories: list[dict]) -> None:
         sim.name, avg_valence,
         ocean["neuroticism"], ocean["agreeableness"],
     )
+
+
+def _apply_personality_lm_drift(sim: "Sim", memory_store: "MemoryStore") -> None:
+    """
+    System 3 — Run KevSun/Personality_LM on the sim's long-term memory
+    narrative and drift current OCEAN 10% toward the model's prediction.
+    """
+    try:
+        entries = memory_store._long_term.get(sim.sim_id, [])
+        if not entries:
+            return
+        memory_text = " ".join(e.get("text", "")[:80] for e in entries[-6:])
+        if len(memory_text) < 60:
+            return
+
+        from identity.ocean_scorer import score_ocean
+        predicted = score_ocean(memory_text)
+        if not predicted:
+            return
+
+        ocean = sim.profile["ocean"]
+        if "ocean_baseline" not in sim.profile:
+            sim.profile["ocean_baseline"] = dict(ocean)
+        baseline = sim.profile["ocean_baseline"]
+
+        for trait, predicted_val in predicted.items():
+            if trait not in ocean:
+                continue
+            current = ocean[trait]
+            base    = baseline.get(trait, current)
+            # 10% of the gap per cycle, capped at ±0.10 from baseline
+            delta   = (predicted_val - current) * 0.10
+            new_val = current + delta
+            new_val = max(base - _OCEAN_DRIFT_CAP, min(base + _OCEAN_DRIFT_CAP, new_val))
+            new_val = max(0.0, min(1.0, new_val))
+            ocean[trait] = round(new_val, 4)
+
+        logger.debug(
+            "[PERSONALITY_LM] %s OCEAN updated from memory narrative", sim.name
+        )
+    except Exception:
+        pass
