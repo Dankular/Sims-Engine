@@ -60,6 +60,16 @@ class Sim:
         self.creative_reputation: float = 0.0  # 0..100
         # Health scare tracking
         self._low_energy_ticks: int = 0
+        # Arc systems (core/arcs.py)
+        self.grief_stage: int = -1              # -1 = not grieving
+        self.grief_target: str = ""
+        self._grief_tick_count: int = 0
+        self._social_drought_ticks: int = 0
+        self._high_perf_low_energy_ticks: int = 0
+        self._burnout_active: bool = False
+        self._burnout_recovery_ticks: int = 0
+        self.trauma_events: list[str] = []
+        self.action_history: dict[str, int] = {}
 
     @property
     def ocean(self) -> dict:

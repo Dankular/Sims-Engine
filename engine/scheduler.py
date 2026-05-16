@@ -565,6 +565,19 @@ def choose_interaction(
             if seed:
                 candidates.append((format_financial_seed(seed), 1.2))
 
+    # Loneliness seed — FIG-Loneliness (when sim_a is socially isolated)
+    if datasets is not None and hasattr(datasets, "loneliness_index") and datasets.loneliness_index:
+        try:
+            from core.arcs import is_lonely
+            from datasets.loneliness import sample_loneliness_seed, format_loneliness_interaction
+            if is_lonely(sim_a):
+                drought = getattr(sim_a, "_social_drought_ticks", 0)
+                seed = sample_loneliness_seed(drought, sim_a.emotion.dominant)
+                if seed:
+                    candidates.append((format_loneliness_interaction(seed, drought), 1.5))
+        except Exception:
+            pass
+
     # Deep support — MentalChat (friendship > 65 + target has active fears)
     if (
         datasets is not None

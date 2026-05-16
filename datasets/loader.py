@@ -51,6 +51,9 @@ from datasets.adult import (
     load_sensual_speech_patterns,
 )
 from datasets.interests import load_all_interests
+from datasets.loneliness import load_loneliness_index
+from datasets.trauma import load_trauma_index
+from datasets.social_conformity import load_conformity_examples
 
 
 @dataclass
@@ -123,7 +126,11 @@ class DatasetRegistry:
     prosocial_nsfw_norms: list[str] = field(default_factory=list)
     literotica_snippets: list[str] = field(default_factory=list)
     # ── Interest-specific content (15 interests) ──────────────────────────────
-    interests_data:     dict        = field(default_factory=dict)
+    interests_data:       dict        = field(default_factory=dict)
+    # ── Arc system datasets ────────────────────────────────────────────────────
+    loneliness_index:     dict        = field(default_factory=dict)
+    trauma_index:         dict        = field(default_factory=dict)
+    conformity_examples:  list[dict]  = field(default_factory=list)
 
     @classmethod
     def load(cls, workers: int = 4) -> "DatasetRegistry":
@@ -184,7 +191,12 @@ class DatasetRegistry:
             "literotica_snippets": load_literotica_snippets,
             # Interest-specific content for all 15 ungrounded interests
             "interests_data":      load_all_interests,
+            # Arc system datasets
+            "loneliness_index":    load_loneliness_index,
+            "trauma_index":        load_trauma_index,
+            "conformity_examples": load_conformity_examples,
         }
+        _list_keys_arc = {"conformity_examples"}
         _list_keys = {
             "okcupid_essays",
             "social_norms",
@@ -219,7 +231,7 @@ class DatasetRegistry:
                 try:
                     results[key] = future.result()
                 except Exception:
-                    results[key] = [] if key in _list_keys else {}
+                    results[key] = [] if (key in _list_keys or key in _list_keys_arc) else {}
 
         return cls(
             okcupid_essays=results["okcupid_essays"],
@@ -272,6 +284,9 @@ class DatasetRegistry:
             prosocial_nsfw_norms=results.get("prosocial_nsfw_norms", []),
             literotica_snippets=results.get("literotica_snippets", []),
             interests_data=results.get("interests_data", {}),
+            loneliness_index=results.get("loneliness_index", {}),
+            trauma_index=results.get("trauma_index", {}),
+            conformity_examples=results.get("conformity_examples", []),
         )
 
 

@@ -104,6 +104,15 @@ class SimEngine:
 
         # Tick all sims — DORMANT gets minimal decay only (no full tick)
         from config import NEEDS_DECAY
+        from core.arcs import (
+            grief_tick, loneliness_tick, burnout_tick,
+            should_trigger_burnout, apply_burnout, maybe_generate_dream,
+        )
+
+        # Track which sims had a social interaction this tick
+        _had_interaction: set[str] = {
+            item.sim_a_id for item in self._pending
+        } | {item.sim_b_id for item in self._pending}
 
         for sim in self.sims:
             if sim.lod_tier == LODTier.DORMANT:
@@ -112,6 +121,27 @@ class SimEngine:
                 continue
             sim._current_tick = self._tick_count
             sim.tick(self.wants_engine, all_sim_ids)
+
+            # Arc system ticks
+            grief_tick(sim)
+            loneliness_tick(sim, had_interaction=(sim.sim_id in _had_interaction))
+            burnout_tick(sim)
+
+            if should_trigger_burnout(sim):
+                apply_burnout(sim)
+                self._run_life_event(sim, None, event_type="burnout",
+                                     context=f"{sim.name} is burned out after sustained overwork.")
+                logger.info("[BURNOUT] %s", sim.name)
+
+            # Seasonal / time-of-day mood modulation (Tier 3, #11)
+            self._apply_seasonal_mood(sim, hour)
+
+            # Dream system: fire on low-energy sleep state
+            dream = maybe_generate_dream(sim)
+            if dream:
+                tag = f"dream:{dream[8:50]}"
+                self.memory_store.write(sim.sim_id, sim.sim_id, tag, 0.0)
+                logger.debug("[DREAM] %s: %s", sim.name, dream[:60])
 
         # Shop visits for critically low needs
         from world.economy import visit_shop
@@ -167,12 +197,15 @@ class SimEngine:
         if self._tick_count % 10 == 0:
             self.relationships.decay_all()
 
-        # Career events
-        if (
-            self._tick_count % CAREER_EVENT_INTERVAL == 0
-            and random.random() < CAREER_EVENT_CHANCE
-        ):
-            self._run_career_event(random.choice(self.sims))
+        # Career events + mentor session check
+        if self._tick_count % CAREER_EVENT_INTERVAL == 0:
+            if random.random() < CAREER_EVENT_CHANCE:
+                self._run_career_event(random.choice(self.sims))
+            # Mentor session: 15% chance when skill gap >= 4 between any active pair
+            if random.random() < 0.15 and len(active) >= 2:
+                mentor = random.choice(active)
+                student = random.choice([s for s in active if s is not mentor])
+                self._run_mentor_session(mentor, student)
 
         # Health scare life events — triggered by chronic low energy
         from datasets.health import HEALTH_SCARE_TICK_COUNT
@@ -587,6 +620,40 @@ class SimEngine:
                                 sim_b.fears.append(new_fear)
         except Exception:
             pass
+
+        # Habit formation — record action repetition
+        try:
+            from core.arcs import register_action_history
+            register_action_history(sim_a, item.interaction[:40])
+        except Exception:
+            pass
+
+        # Trauma OCEAN drift — on high-magnitude negative events
+        if abs(valence) > 0.8 and valence < 0:
+            try:
+                from datasets.trauma import apply_trauma_drift
+                event_hint = (
+                    "loss" if "loss" in item.interaction.lower()
+                    else "conflict" if valence < -0.7
+                    else "rejection"
+                )
+                apply_trauma_drift(sim_a, event_hint)
+            except Exception:
+                pass
+
+        # Jealousy system — detect when a romantic interaction is observed by a partner
+        if "flirt" in item.interaction.lower() or "romantic" in item.interaction.lower():
+            try:
+                self._check_jealousy(sim_a, sim_b, valence)
+            except Exception:
+                pass
+
+        # Gift giving — handle "give gift" interaction outcome
+        if "give gift" in item.interaction.lower() or "[GIFT]" in item.interaction:
+            try:
+                self._apply_gift_outcome(sim_a, sim_b, result)
+            except Exception:
+                pass
 
         sim_a.register_action(item.interaction, self._tick_count)
 
@@ -1079,6 +1146,14 @@ class SimEngine:
                 result=result,
                 tick=self._tick_count,
             )
+
+            # Grief arc — trigger on loss events
+            if event_type in ("loss", "health_scare") and sim_a.grief_stage < 0:
+                from core.arcs import start_grief
+                target_label = (sim_b.name if sim_b else context) or event_type
+                start_grief(sim_a, target_label)
+                logger.info("[Grief] %s enters grief arc for '%s'", sim_a.name, target_label)
+
         except Exception as exc:
             logger.warning("Life event failed: %s", exc)
 
@@ -1110,6 +1185,19 @@ class SimEngine:
                 return
             participants = random.sample(active_sims, min(3, len(active_sims)))
             sim_names = [s.name for s in participants]
+
+            # Peer pressure — check conformity pressure and optionally seed narrative
+            try:
+                from datasets.social_conformity import compute_conformity_pressure, sample_herding_seed
+                pressures = compute_conformity_pressure(participants, "agreeableness")
+                max_pressure_id = max(pressures, key=pressures.get)
+                if pressures[max_pressure_id] > 0.6:
+                    herding = sample_herding_seed()
+                    if herding:
+                        trigger = f"{trigger} [peer pressure: {herding[:100]}]"
+            except Exception:
+                pass
+
             interaction = format_group_interaction(scene, sim_names, trigger)
             initiator = participants[0]
             target = participants[1]
@@ -1122,6 +1210,95 @@ class SimEngine:
             )
         except Exception as exc:
             logger.debug("Group event failed: %s", exc)
+
+    # ── Arc system helpers ────────────────────────────────────────────────────
+
+    def _apply_seasonal_mood(self, sim: Sim, hour: int) -> None:
+        """Apply time-of-day and seasonal mood modulation (Tier 3, #11)."""
+        month = 1 + (self._tick_count // 200) % 12  # 1 month per 200 ticks
+
+        # Seasonal effects
+        if month in (12, 1, 2):   # winter
+            sim.needs.energy = max(0, sim.needs.energy - 0.15)
+            sim.needs.social = max(0, sim.needs.social - 0.10)
+        elif month in (6, 7, 8):  # summer
+            sim.needs.fun = min(100, sim.needs.fun + 0.15)
+
+        # Time-of-day effects
+        if 6 <= hour < 9:         # morning
+            sim.needs.energy = max(0, sim.needs.energy - 0.20)
+        elif 18 <= hour < 21:     # evening social/fun bonus
+            sim.needs.social = min(100, sim.needs.social + 0.10)
+            sim.needs.fun    = min(100, sim.needs.fun    + 0.10)
+
+    def _check_jealousy(self, flirter: Sim, target: Sim, valence: float) -> None:
+        """Detect jealousy in the target's existing partner when flirting fires."""
+        for sim in self.sims:
+            if sim.sim_id in (flirter.sim_id, target.sim_id):
+                continue
+            rel_with_target = self.relationships.get(sim.sim_id, target.sim_id)
+            if rel_with_target.romance < 80:
+                continue
+            # This sim is target's partner — they may feel jealous
+            neuro  = sim.ocean.get("neuroticism", 0.5)
+            increase = 15 * neuro * max(0, valence)
+            rel_with_target.jealousy_score = min(100,
+                rel_with_target.jealousy_score + increase)
+            if rel_with_target.jealousy_score > 50:
+                sim.emotion.add("annoyance", 0.7, duration=5, source="jealousy")
+                # Damage flirter-partner relationship
+                rel_with_flirter = self.relationships.get(sim.sim_id, flirter.sim_id)
+                rel_with_flirter.apply_deltas(-5, 0)
+                logger.info("[JEALOUSY] %s jealous of %s flirting with %s (score=%.0f)",
+                            sim.name, flirter.name, target.name,
+                            rel_with_target.jealousy_score)
+            if rel_with_target.jealousy_score > 70:
+                # Romance damage on the primary relationship
+                rel_with_target.apply_deltas(-3, -5)
+                rel_with_target.jealousy_score = 50  # reset after consequence
+
+    def _apply_gift_outcome(self, giver: Sim, receiver: Sim, result: dict) -> None:
+        """Apply friendship bonus based on gift interest-match."""
+        giver_interests = set(giver.profile.get("interests", []))
+        receiver_interests = set(receiver.profile.get("interests", []))
+        match = bool(giver_interests & receiver_interests)
+        bonus = 8.0 if match else 2.0
+
+        # Broke sim giving expensive gift → admiration bonus
+        if giver.simoleons < 300 and random.random() < 0.5:
+            bonus += 3.0
+            receiver.emotion.add("admiration", 0.6, duration=5, source="gift_sacrifice")
+
+        rel = self.relationships.get(giver.sim_id, receiver.sim_id)
+        rel.apply_deltas(bonus, bonus * 0.3)
+        logger.info("[GIFT] %s→%s match=%s bonus=+%.1f", giver.name, receiver.name, match, bonus)
+
+    def _run_mentor_session(self, mentor: Sim, mentee: Sim) -> None:
+        """Fire a mentoring interaction when skill gap >= 4."""
+        rel = self.relationships.get(mentor.sim_id, mentee.sim_id)
+        if rel.friendship < 45:
+            return
+
+        # Find the largest skill gap
+        gap_skill = None
+        max_gap = 0
+        for skill, level in mentor.skills.levels.items():
+            mentee_level = mentee.skills.levels.get(skill, 0)
+            gap = level - mentee_level
+            if gap > max_gap:
+                max_gap = gap
+                gap_skill = skill
+
+        if not gap_skill or max_gap < 4:
+            return
+
+        rel.mentor_of = mentee.sim_id
+        mentee.skills.gain_xp(gap_skill, 0.5)
+        mentor.skills.gain_xp("charisma", 0.3)
+        rel.apply_deltas(3, 0)
+        logger.info("[MENTOR] %s teaches %s +0.5 %s", mentor.name, mentee.name, gap_skill)
+        self._bus.emit("mentor_session", mentor=mentor, mentee=mentee,
+                       skill=gap_skill, tick=self._tick_count)
 
     def _on_tick_complete(self, **_: Any) -> None:
         pass

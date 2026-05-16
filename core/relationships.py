@@ -17,8 +17,12 @@ class RelationshipRecord:
     memories: list[dict] = field(default_factory=list)
     # Toxic cycle tracking (Gap 4)
     in_toxic_cycle: bool = False
-    toxic_cycle_phase: str = "none"   # "love_bombing" | "devaluation" | "repair" | "none"
-    toxic_cycle_tick: int = 0         # tick when current phase started
+    toxic_cycle_phase: str = "none"
+    toxic_cycle_tick: int = 0
+    # Jealousy system (Tier 1)
+    jealousy_score: float = 0.0       # 0-100; rises when partner is flirted with
+    # Mentor/student relationship (Tier 2)
+    mentor_of: str = ""               # sim_id of the sim this one is mentoring
 
     def state_label(self) -> str:
         if self.friendship >= REL_BEST:
