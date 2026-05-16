@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Simulation state
+sim_state.db
+*.db
+
+# Dataset cache (regenerated automatically)
+.sim_cache/
+
+# Model files
+*.gguf
+*.bin
+*.safetensors
+
+# Ruff / linter
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Env
+.env
+*.env
+
+# Private notes
+CLAUDE*.md
+plan.md
+
+# OS
+Thumbs.db
+.DS_Store

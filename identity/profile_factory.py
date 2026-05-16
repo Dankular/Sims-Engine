@@ -1,0 +1,99 @@
+import random
+import uuid
+
+from config import (
+    ASPIRATIONS,
+    DEALBREAKERS_POOL,
+    DIETS,
+    INTERESTS_POOL,
+    JOBS,
+    TRAITS_POOL,
+)
+from identity.faker_identity import generate_identity
+from identity.ocean_scorer import ocean_from_text
+
+
+def generate_sim_profile(
+    sim_id: str | None = None, okcupid_essays: list[str] | None = None
+) -> dict:
+    rng = random.Random()
+    sim_id = sim_id or str(uuid.uuid4())[:8]
+    identity = generate_identity()
+
+    name = (
+        f"{identity.get('first_name', 'Sim')} {identity.get('last_name', '')}".strip()
+    )
+    age = int(identity.get("age", rng.randint(22, 40)))
+    gender = rng.choice(["man", "woman", "non-binary", "woman", "man"])
+    diet = rng.choice(DIETS)
+    job = rng.choice(JOBS)
+    income = rng.choice(["low", "medium", "high"])
+    interests = rng.sample(INTERESTS_POOL, k=rng.randint(3, 5))
+    traits = rng.sample(TRAITS_POOL, k=rng.randint(2, 4))
+    dealbreakers = rng.sample(DEALBREAKERS_POOL, k=rng.randint(1, 3))
+    aspiration = rng.choice(ASPIRATIONS)
+
+    # Use a real OkCupid essay for OCEAN scoring when available
+    essay = random.choice(okcupid_essays) if okcupid_essays else None
+    ocean = ocean_from_text(essay or identity.get("username", sim_id))
+    ocean_source = "personality_lm" if essay else "synthetic"
+
+    humor_types = [
+        "dry",
+        "slapstick",
+        "dark",
+        "self-deprecating",
+        "absurdist",
+        "wholesome",
+    ]
+    humor = humor_types[int(ocean["openness"] * (len(humor_types) - 1))]
+    if ocean["extraversion"] > 0.7:
+        comm_style = "enthusiastic and verbose"
+    elif ocean["extraversion"] > 0.4:
+        comm_style = "warm and measured"
+    else:
+        comm_style = "reserved, opens up slowly"
+
+    neuroticism, agreeableness = ocean["neuroticism"], ocean["agreeableness"]
+    if neuroticism < 0.4 and agreeableness > 0.5:
+        attachment = "secure"
+    elif neuroticism > 0.6:
+        attachment = "anxious"
+    elif agreeableness < 0.35:
+        attachment = "avoidant"
+    else:
+        attachment = "secure-leaning"
+
+    self_summary = (
+        f"I work as a {job} and genuinely love it. "
+        f"Huge into {interests[0]} and {interests[1]}. "
+        f"I'm {traits[0]} and probably {traits[1]}. "
+        f"Important to me: {aspiration.lower()} above all. "
+        f"Can't stand {dealbreakers[0]}."
+    )
+
+    return {
+        "id": sim_id,
+        "name": name,
+        "age": age,
+        "email": identity.get("email", ""),
+        "city": identity.get("city", "Unknown"),
+        "country": identity.get("country", "Unknown"),
+        "identity_source": "faker"
+        if identity.get("city", "Unknown") != "Unknown"
+        else "fallback",
+        "ocean_source": ocean_source,
+        "gender": gender,
+        "diet": diet,
+        "job": job,
+        "income": income,
+        "interests": interests,
+        "traits": traits,
+        "dealbreakers": dealbreakers,
+        "aspiration": aspiration,
+        "ocean": ocean,
+        "humor_type": humor,
+        "comm_style": comm_style,
+        "attachment": attachment,
+        "self_summary": self_summary,
+    }

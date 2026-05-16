@@ -1,0 +1,163 @@
+"""
+sim_v2 — standalone simulation runner.
+
+Usage:
+    python -m sim_v2                        # 3 sims, 10 ticks, llama-cpp backend
+    python -m sim_v2 --sims 5              # 5 sims
+    python -m sim_v2 --ticks 20            # 20 ticks
+    python -m sim_v2 --profile             # print one profile as JSON and exit
+    python -m sim_v2 --backend ollama      # use Ollama HTTP backend
+    python -m sim_v2 --backend llama-server --llama-url http://127.0.0.1:8080/v1/chat/completions
+    python -m sim_v2 --dry-run             # 2 sims, 1 tick, no delay (smoke test)
+    python -m sim_v2 --update              # clear dataset cache and re-download
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import os
+import sys
+import time
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
+logging.basicConfig(level=logging.WARNING, format="%(message)s")
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="python -m sim_v2",
+        description="AI Sims Engine v2 — local LLM-powered life simulation",
+    )
+    p.add_argument("--sims", type=int, default=3, help="Number of sims (default: 3)")
+    p.add_argument("--ticks", type=int, default=10, help="Ticks to run (default: 10)")
+    p.add_argument("--profile", action="store_true", help="Print one profile as JSON and exit")
+    p.add_argument("--delay", type=float, default=0.5, help="Seconds between ticks (default: 0.5)")
+    p.add_argument("--dry-run", action="store_true", help="2 sims, 1 tick, no delay")
+    p.add_argument("--update", action="store_true", help="Clear dataset cache and re-download")
+    p.add_argument(
+        "--backend",
+        default="ollama",
+        choices=["llama-cpp", "ollama", "llama-server"],
+        help="LLM backend (default: ollama)",
+    )
+    p.add_argument("--ollama-model", default=None, help="Ollama model name")
+    p.add_argument("--ollama-url", default=None, help="Ollama API URL")
+    p.add_argument("--llama-url", default=None, help="llama-server OpenAI-compat URL")
+    p.add_argument("--llama-model", default=None, help="Model id sent to llama-server")
+    p.add_argument("--llm-timeout", type=int, default=240, help="LLM request timeout (default: 240)")
+    p.add_argument("--no-datasets", action="store_true", help="Skip dataset loading")
+    return p
+
+
+def main() -> None:
+    args = _build_parser().parse_args()
+
+    if args.dry_run:
+        args.sims = 2
+        args.ticks = 1
+        args.delay = 0.0
+        print("[INFO] Dry-run mode: sims=2 ticks=1 delay=0\n")
+
+    # Dataset cache management
+    if args.update:
+        from datasets.cache import clear_dataset_cache
+        clear_dataset_cache()
+        print("[INFO] Dataset cache cleared.\n")
+
+    # Profile-only mode
+    if args.profile:
+        from identity.profile_factory import generate_sim_profile
+        print(json.dumps(generate_sim_profile(), indent=2, ensure_ascii=False))
+        return
+
+    # Apply backend env overrides before creating the backend
+    if args.ollama_model:
+        os.environ["SIM_V2_OLLAMA_MODEL"] = args.ollama_model
+    if args.ollama_url:
+        os.environ["SIM_V2_OLLAMA_URL"] = args.ollama_url
+    if args.llama_url:
+        os.environ["SIM_V2_LLAMA_SERVER_URL"] = args.llama_url
+    if args.llama_model:
+        os.environ["SIM_V2_LLAMA_SERVER_MODEL"] = args.llama_model
+    if args.llm_timeout:
+        os.environ.setdefault("SIM_V2_OLLAMA_TIMEOUT", str(args.llm_timeout))
+        os.environ.setdefault("SIM_V2_LLAMA_SERVER_TIMEOUT", str(args.llm_timeout))
+
+    # llama-cpp downloads the GGUF at construction time — skip for dry-run
+    if args.dry_run and args.backend == "llama-cpp":
+        args.backend = "ollama"
+        print("[INFO] dry-run: switched backend to ollama to skip GGUF download\n")
+
+    from llm.backend import create_backend
+    print(f"[INFO] LLM backend: {args.backend}")
+    llm = create_backend(args.backend)
+
+    # Load datasets
+    datasets = None
+    essays: list[str] = []
+    if not args.no_datasets:
+        print("[INFO] Loading datasets...")
+        from datasets.loader import load_all_datasets
+        datasets = load_all_datasets()
+        essays = datasets.okcupid_essays
+        print(
+            f"[INFO] Datasets ready — {len(datasets.social_norms)} social norms, "
+            f"{len(essays)} OkCupid essays, "
+            f"{len(datasets.atomic_index)} ATOMIC keywords\n"
+        )
+
+    # Generate sims
+    from identity.profile_factory import generate_sim_profile
+    from core.sim import Sim
+    from display import print_sim_profile, print_tick_header, print_active_sims, print_summary, attach
+
+    print(f"[INFO] Generating {args.sims} sim profiles...\n")
+    sims: list[Sim] = []
+    for _ in range(args.sims):
+        profile = generate_sim_profile(okcupid_essays=essays or None)
+        sim = Sim(profile)
+        sims.append(sim)
+        print_sim_profile(sim)
+
+    # Assign households
+    from world.households import assign_households
+    households = assign_households(sims)
+    print(f"\n[INFO] {len(households)} household(s) created.")
+
+    # Persistence layer
+    from persistence.sqlite import PersistenceLayer
+    db = PersistenceLayer()
+
+    # Build and wire engine
+    from engine.engine import SimEngine
+    engine = SimEngine(sims=sims, llm=llm, datasets=datasets, db=db)
+    engine.households = households
+    attach(engine)
+
+    print(f"\n[INFO] Starting simulation — {args.ticks} ticks\n")
+    try:
+        for _ in range(args.ticks):
+            print_tick_header(engine)
+            engine.run_tick()
+            print_active_sims(engine)
+            time.sleep(args.delay)
+    except KeyboardInterrupt:
+        print("\n[Interrupted by user]")
+
+    # Drain pending LLM calls before summary
+    if engine._pending:
+        print(f"\n[INFO] Draining {len(engine._pending)} pending adjudication(s)...")
+        engine.flush_pending()
+
+    print_summary(engine)
+    engine.shutdown()
+    print("\n[INFO] Done.\n")
+
+
+if __name__ == "__main__":
+    main()
