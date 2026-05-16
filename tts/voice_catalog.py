@@ -1,18 +1,26 @@
+"""
+tts/voice_catalog.py — OmniVoice voice slot catalog.
+
+Replaces the old Supertonic/ElevenLabs catalog.  Voices are identified
+by slot ID (M1-M5, F1-F5) and synthesised via OmniVoice instruct= mode
+— no reference audio files are needed.
+"""
 from __future__ import annotations
 
-import json
-from pathlib import Path
+from tts.engine import VOICE_INSTRUCT
 
 
-def load_voice_catalog(path: str | Path = "el_voices.json") -> list[dict]:
-    p = Path(path)
-    if not p.exists():
-        return []
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-    return data if isinstance(data, list) else []
+def load_voice_catalog() -> list[dict]:
+    """Return the built-in OmniVoice voice slot list."""
+    return [
+        {
+            "id": slot,
+            "description": instruct,
+            "gender": "male" if slot.startswith("M") else "female",
+            "category": "built-in",
+        }
+        for slot, instruct in VOICE_INSTRUCT.items()
+    ]
 
 
 def find_voice_by_id(voice_id: str, voices: list[dict]) -> dict | None:
@@ -24,15 +32,15 @@ def find_voice_by_id(voice_id: str, voices: list[dict]) -> dict | None:
 
 def list_voices(
     voices: list[dict],
-    language: str | None = None,
+    gender: str | None = None,
     category: str | None = None,
     limit: int = 25,
 ) -> list[dict]:
     out: list[dict] = []
     for v in voices:
-        if language and str(v.get("language", "")).lower() != language.lower():
+        if gender and v.get("gender", "").lower() != gender.lower():
             continue
-        if category and str(v.get("category", "")).lower() != category.lower():
+        if category and v.get("category", "").lower() != category.lower():
             continue
         out.append(v)
         if len(out) >= limit:

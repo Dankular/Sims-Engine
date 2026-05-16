@@ -75,10 +75,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Narrate every N ticks (default: 1)",
     )
     p.add_argument(
-        "--tts-quality", type=int, default=8, help="TTS quality steps 5-12 (default: 8)"
+        "--tts-steps", type=int, default=32,
+        help="OmniVoice diffusion steps — higher = slower but better (default: 32)"
     )
     p.add_argument(
         "--tts-speed", type=float, default=1.0, help="TTS speed 0.7-2.0 (default: 1.0)"
+    )
+    p.add_argument(
+        "--tts-device", default="cpu",
+        help="OmniVoice device: 'cpu' or 'cuda:0' (default: cpu)"
     )
     p.add_argument(
         "--no-audio-save", action="store_true", help="Don't save audio files to disk"
@@ -86,7 +91,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--narrator-voice-id",
         default=None,
-        help="Narrator voice id/name (e.g. from el_voices.json)",
+        help="Narrator voice slot: M1-M5 or F1-F5 (default: F1)",
     )
     p.add_argument(
         "--list-voices",
@@ -246,10 +251,11 @@ def main() -> None:
         from narrative.story_runner import attach as attach_story
 
         tts = TTSEngine(
-            quality=args.tts_quality,
+            num_steps=args.tts_steps,
             speed=args.tts_speed,
             save_audio=not args.no_audio_save,
             narrator_voice=args.narrator_voice_id,
+            device=args.tts_device,
         )
         tts.assign_voices([s.name for s in sims])
         _story_runner = attach_story(engine, tts, llm, narrate_every=args.narrate_every)

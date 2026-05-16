@@ -1,8 +1,12 @@
 """
-tts/engine.py — Supertonic TTS wrapper.
+tts/engine.py — OmniVoice TTS wrapper.
 
-Assigns a unique voice to the narrator and to each sim, then synthesizes
-and plays back speech segments in sequence.
+Replaces Supertonic with Prince-1/OmniVoice-Onnx.  Uses voice-design
+(instruct=) mode so no reference audio files are required — each of the
+10 voice slots (M1-M5 / F1-F5) is described via a text persona and
+synthesized on demand.
+
+System 3 emotion-driven speed modulation is wired in.
 """
 
 from __future__ import annotations
@@ -11,15 +15,12 @@ import logging
 import os
 import threading
 import tempfile
-import urllib.request
-import inspect
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
-# ── System 3: Emotion → speech-rate mapping ───────────────────────────────────
-# Values are multipliers applied to the base speed before synthesis.
+# ── System 3: Emotion → speech-rate multipliers ───────────────────────────────
 _EMOTION_SPEED: dict[str, float] = {
     "grief":       0.82,
     "sadness":     0.86,
@@ -35,181 +36,188 @@ _EMOTION_SPEED: dict[str, float] = {
     "relief":      0.92,
     "confusion":   0.98,
 }
-_EMOTION_SPEED_DEFAULT = 1.0
 
 
 def _emotion_speed_modifier(emotion: str) -> float:
-    return _EMOTION_SPEED.get(emotion.lower().strip(), _EMOTION_SPEED_DEFAULT)
+    return _EMOTION_SPEED.get(emotion.lower().strip(), 1.0)
 
 
-# Voice pool — narrator gets F1 by default, sims cycle through the rest
-_DEFAULT_NARRATOR_VOICE = "F1"
-_BUILTIN_VOICES = {"F1", "F2", "F3", "F4", "F5", "M1", "M2", "M3", "M4", "M5"}
-_SIM_VOICES = ["M1", "M2", "M3", "F2", "F3", "M4", "F4", "M5", "F5"]
+# ── Voice pool ────────────────────────────────────────────────────────────────
+# Each slot gets a text description fed to OmniVoice's instruct= parameter.
+# The descriptions are distinct enough for the model to produce clearly
+# different-sounding voices without any reference audio files.
+VOICE_INSTRUCT: dict[str, str] = {
+    "M1": "male, medium pitch, American accent, warm and authoritative tone",
+    "M2": "male, low pitch, British accent, deep and measured delivery",
+    "M3": "male, higher pitch, young American, energetic and upbeat",
+    "M4": "male, medium pitch, Australian accent, relaxed and friendly",
+    "M5": "male, low gravelly pitch, older Southern American, storyteller",
+    "F1": "female, medium pitch, clear American accent, calm narrator voice",
+    "F2": "female, higher pitch, young American, warm and cheerful",
+    "F3": "female, low pitch, British accent, composed and professional",
+    "F4": "female, medium pitch, Australian accent, bright and expressive",
+    "F5": "female, higher pitch, young British, lively and animated",
+}
 
-_AUDIO_DIR = Path(__file__).parent.parent / "audio"
+_NARRATOR_VOICE   = "F1"
+_SIM_VOICE_POOL   = ["M1", "M2", "M3", "F2", "F3", "M4", "F4", "M5", "F5"]
+_AUDIO_DIR        = Path(__file__).parent.parent / "audio"
+_SAMPLE_RATE      = 24_000   # OmniVoice output sample rate
 
 
 class TTSEngine:
-    """Wraps Supertonic TTS. Lazy-loads the model on first use."""
+    """OmniVoice TTS — lazy-loads on first speak() call."""
 
     def __init__(
         self,
-        quality: int = 8,
         speed: float = 1.0,
         save_audio: bool = True,
         narrator_voice: str | None = None,
+        num_steps: int = 32,
+        device: str = "cpu",
     ):
-        self._quality = quality
-        self._speed = speed
-        self._save = save_audio
-        self._narrator_voice = (narrator_voice or _DEFAULT_NARRATOR_VOICE).strip()
-        self._narrator_style_voice = (
-            self._narrator_voice
-            if self._narrator_voice in _BUILTIN_VOICES
-            else _DEFAULT_NARRATOR_VOICE
-        )
-        self._tts = None
-        self._lock = threading.Lock()
-        self._voice_cache: dict[str, object] = {}
-        self._sim_voice_map: dict[str, str] = {}  # sim_name → voice_name
-        self._voice_pool = list(_SIM_VOICES)
-        self._tick = 0
-        self._narrator_ref_audio: str | None = None
+        self._speed        = speed
+        self._save         = save_audio
+        self._narrator_voice = (narrator_voice or _NARRATOR_VOICE).strip()
+        self._num_steps    = num_steps
+        self._device       = device
+        self._model        = None
+        self._lock         = threading.Lock()
+        self._sim_voice_map: dict[str, str] = {}   # sim_name → voice slot
+        self._voice_pool   = list(_SIM_VOICE_POOL)
         if save_audio:
             _AUDIO_DIR.mkdir(exist_ok=True)
 
     def assign_voices(self, sim_names: list[str]) -> None:
-        """Assign a unique TTS voice to each sim."""
+        """Assign a unique voice slot to each sim (round-robin from pool)."""
         for i, name in enumerate(sim_names):
             if name not in self._sim_voice_map:
                 self._sim_voice_map[name] = self._voice_pool[i % len(self._voice_pool)]
         logger.info(
-            "Voice assignments: narrator=%s (style=%s) | %s",
+            "Voice assignments: narrator=%s | %s",
             self._narrator_voice,
-            self._narrator_style_voice,
             " | ".join(f"{n}={v}" for n, v in self._sim_voice_map.items()),
         )
 
-    def _load(self):
-        if self._tts is not None:
+    def _load(self) -> None:
+        if self._model is not None:
             return
-        import huggingface_hub.constants as _hf_const
-        from supertonic import TTS
 
-        # ocean_scorer.py sets HF_HUB_OFFLINE=1 at import time — unset it
-        # so Supertonic can download its ONNX assets, then restore.
+        # ocean_scorer sets HF_HUB_OFFLINE=1 — unset it so the model can download
+        import huggingface_hub.constants as _hf_const
         _offline_vars = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")
-        _saved_env = {k: os.environ.pop(k, None) for k in _offline_vars}
+        _saved_env  = {k: os.environ.pop(k, None) for k in _offline_vars}
         _saved_flag = _hf_const.HF_HUB_OFFLINE
         _hf_const.HF_HUB_OFFLINE = False
+
         try:
-            logger.info("Loading Supertonic TTS model...")
-            self._tts = TTS(auto_download=True)
-            logger.info("Supertonic ready.")
+            from omnivoice import OmniVoice
+
+            # Try the ONNX-optimised variant first, fall back to base model
+            for repo in ("Prince-1/OmniVoice-Onnx", "k2-fsa/OmniVoice"):
+                try:
+                    logger.info("Loading OmniVoice from %s ...", repo)
+                    kwargs: dict = {}
+                    try:
+                        import torch
+                        dtype = torch.float32   # float16 is slow on CPU
+                        if self._device.startswith("cuda"):
+                            dtype = torch.float16
+                        kwargs = {"device_map": self._device, "dtype": dtype}
+                    except ImportError:
+                        pass
+                    self._model = OmniVoice.from_pretrained(repo, **kwargs)
+                    logger.info("OmniVoice ready (%s).", repo)
+                    return
+                except Exception as exc:
+                    logger.warning("OmniVoice from %s failed: %s", repo, exc)
+
+            raise RuntimeError("Could not load OmniVoice from any known repo.")
+
         finally:
             _hf_const.HF_HUB_OFFLINE = _saved_flag
             for k, v in _saved_env.items():
                 if v is not None:
                     os.environ[k] = v
 
-    def _get_style(self, voice_name: str):
-        if voice_name not in self._voice_cache:
-            self._load()
-            if self._tts is None:
-                raise RuntimeError("TTS backend is unavailable")
-            self._voice_cache[voice_name] = self._tts.get_voice_style(
-                voice_name=voice_name
-            )
-        return self._voice_cache[voice_name]
-
-    def _resolve_narrator_reference_audio(self) -> str | None:
-        if self._narrator_ref_audio is not None:
-            return self._narrator_ref_audio
+    def _synthesize(self, text: str, voice_slot: str, speed: float) -> "np.ndarray | None":
+        """Run OmniVoice inference. Returns a mono float32 array or None."""
+        instruct = VOICE_INSTRUCT.get(voice_slot, VOICE_INSTRUCT["M1"])
         try:
-            from tts.voice_catalog import load_voice_catalog, find_voice_by_id
-
-            voices = load_voice_catalog()
-            rec = find_voice_by_id(self._narrator_voice, voices)
-            preview_url = str(rec.get("preview_url", "")).strip() if rec else ""
-            if not preview_url:
-                self._narrator_ref_audio = ""
+            result = self._model.generate(
+                text=text,
+                instruct=instruct,
+                speed=speed,
+                num_step=self._num_steps,
+            )
+            # generate() returns a list of arrays or a single array
+            if isinstance(result, (list, tuple)):
+                audio = result[0]
+            else:
+                audio = result
+            import numpy as np
+            return np.array(audio, dtype=np.float32).flatten()
+        except TypeError:
+            # Some versions don't accept instruct= — fall back to ref_audio=None
+            try:
+                result = self._model.generate(text=text, speed=speed)
+                import numpy as np
+                arr = result[0] if isinstance(result, (list, tuple)) else result
+                return np.array(arr, dtype=np.float32).flatten()
+            except Exception as exc2:
+                logger.warning("OmniVoice synthesis fallback failed: %s", exc2)
                 return None
-            tmp_dir = Path(tempfile.gettempdir()) / "sims_engine_voice_refs"
-            tmp_dir.mkdir(exist_ok=True)
-            out = tmp_dir / f"{self._narrator_voice}.mp3"
-            if not out.exists():
-                urllib.request.urlretrieve(preview_url, out)
-            self._narrator_ref_audio = str(out)
-            return self._narrator_ref_audio
-        except Exception:
-            self._narrator_ref_audio = ""
+        except Exception as exc:
+            logger.warning("OmniVoice synthesis failed: %s", exc)
             return None
 
     def speak(self, speaker: str, text: str, tick: int = 0, emotion: str = "") -> None:
         """Synthesize and play one segment. Blocks until playback completes."""
         if not text.strip():
             return
-        voice_name = (
-            self._narrator_style_voice
+
+        voice_slot = (
+            self._narrator_voice
             if speaker.lower() == "narrator"
-            else self._sim_voice_map.get(speaker, self._narrator_style_voice)
+            else self._sim_voice_map.get(speaker, self._narrator_voice)
         )
-        # System 3: modulate playback speed by current emotion
         effective_speed = self._speed * _emotion_speed_modifier(emotion)
+
         with self._lock:
             self._load()
-            if self._tts is None:
-                return
-            style = self._get_style(voice_name)
-            try:
-                extra_kwargs = {}
-                if speaker.lower() == "narrator":
-                    ref = self._resolve_narrator_reference_audio()
-                    if ref:
-                        sig = inspect.signature(self._tts.synthesize)
-                        if "reference_audio" in sig.parameters:
-                            extra_kwargs["reference_audio"] = ref
-                        elif "reference_wav" in sig.parameters:
-                            extra_kwargs["reference_wav"] = ref
-                        elif "speaker_wav" in sig.parameters:
-                            extra_kwargs["speaker_wav"] = ref
-                wav, duration = self._tts.synthesize(
-                    text=text,
-                    voice_style=style,
-                    total_steps=self._quality,
-                    speed=effective_speed,
-                    lang="en",
-                    **extra_kwargs,
-                )
-            except Exception as exc:
-                logger.warning("TTS synthesis failed for %r: %s", text[:60], exc)
+            if self._model is None:
                 return
 
-            out = None
+            audio = self._synthesize(text, voice_slot, effective_speed)
+            if audio is None:
+                return
+
+            out: Path | None = None
             if self._save:
-                safe_speaker = speaker.replace(" ", "_").lower()
-                out = _AUDIO_DIR / f"tick{tick:03d}_{safe_speaker}.wav"
-                self._tts.save_audio(wav, str(out))
-                logger.debug("Saved audio: %s", out)
+                safe = speaker.replace(" ", "_").lower()
+                out = _AUDIO_DIR / f"tick{tick:03d}_{safe}.wav"
+                try:
+                    import soundfile as sf
+                    sf.write(str(out), audio, _SAMPLE_RATE)
+                    logger.debug("Saved audio: %s", out)
+                except Exception as exc:
+                    logger.warning("Could not save audio: %s", exc)
+                    out = None
 
-            # Play back: prefer the saved WAV (winsound on Windows), else sounddevice
+            # Playback — prefer winsound (Windows WAV), fall back to sounddevice
             played = False
-            if self._save and out is not None and out.exists():
+            if out is not None and out.exists():
                 try:
                     import winsound
-
                     winsound.PlaySound(str(out), winsound.SND_FILENAME)
                     played = True
                 except Exception:
                     pass
+
             if not played:
                 try:
                     import sounddevice as sd
-                    import numpy as np
-
-                    audio = np.array(wav).flatten()
-                    sd.play(audio, samplerate=22050, channels=1, blocking=True)
+                    sd.play(audio, samplerate=_SAMPLE_RATE, channels=1, blocking=True)
                 except Exception as exc:
                     logger.warning("Audio playback failed: %s", exc)
 
