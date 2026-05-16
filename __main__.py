@@ -84,11 +84,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-audio-save", action="store_true", help="Don't save audio files to disk"
     )
     p.add_argument(
-        "--adult-content",
-        action="store_true",
-        help="Enable adult dataset layer (18+) via SIM_V2_ADULT=1",
-    )
-    p.add_argument(
         "--narrator-voice-id",
         default=None,
         help="Narrator voice id/name (e.g. from el_voices.json)",
@@ -180,8 +175,7 @@ def main() -> None:
     if args.llm_timeout:
         os.environ.setdefault("SIM_V2_OLLAMA_TIMEOUT", str(args.llm_timeout))
         os.environ.setdefault("SIM_V2_LLAMA_SERVER_TIMEOUT", str(args.llm_timeout))
-    if args.adult_content:
-        os.environ["SIM_V2_ADULT"] = "1"
+    # Adult datasets always loaded; age-gated at interaction selection (sim.age >= 16)
 
     # llama-cpp downloads the GGUF at construction time — skip for dry-run
     if args.dry_run and args.backend == "llama-cpp":
@@ -207,8 +201,7 @@ def main() -> None:
             f"{len(essays)} OkCupid essays, "
             f"{len(datasets.atomic_index)} ATOMIC keywords\n"
         )
-        if os.environ.get("SIM_V2_ADULT", "0") == "1":
-            print("[INFO] Adult dataset layer enabled (SIM_V2_ADULT=1).\n")
+        print("[INFO] Adult content age-gated at sim.age >= 16 (no flag required).\n")
 
     # Generate sims
     from identity.profile_factory import generate_sim_profile

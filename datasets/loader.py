@@ -50,6 +50,7 @@ from datasets.adult import (
     load_literotica_snippets,
     load_sensual_speech_patterns,
 )
+from datasets.interests import load_all_interests
 
 
 @dataclass
@@ -121,6 +122,8 @@ class DatasetRegistry:
     sensual_patterns: list[str] = field(default_factory=list)
     prosocial_nsfw_norms: list[str] = field(default_factory=list)
     literotica_snippets: list[str] = field(default_factory=list)
+    # ── Interest-specific content (15 interests) ──────────────────────────────
+    interests_data:     dict        = field(default_factory=dict)
 
     @classmethod
     def load(cls, workers: int = 4) -> "DatasetRegistry":
@@ -175,15 +178,13 @@ class DatasetRegistry:
             "intima_codes": load_intima,
             "boru_arcs": load_boru_arcs,
             "self_disclosure_depth": load_self_disclosure,
+            # Adult datasets — always loaded; age-gated at interaction selection
+            "sensual_patterns":    load_sensual_speech_patterns,
+            "prosocial_nsfw_norms": load_adult_norms,
+            "literotica_snippets": load_literotica_snippets,
+            # Interest-specific content for all 15 ungrounded interests
+            "interests_data":      load_all_interests,
         }
-        if os.environ.get("SIM_V2_ADULT", "0") == "1":
-            loaders.update(
-                {
-                    "sensual_patterns": load_sensual_speech_patterns,
-                    "prosocial_nsfw_norms": load_adult_norms,
-                    "literotica_snippets": load_literotica_snippets,
-                }
-            )
         _list_keys = {
             "okcupid_essays",
             "social_norms",
@@ -270,6 +271,7 @@ class DatasetRegistry:
             sensual_patterns=results.get("sensual_patterns", []),
             prosocial_nsfw_norms=results.get("prosocial_nsfw_norms", []),
             literotica_snippets=results.get("literotica_snippets", []),
+            interests_data=results.get("interests_data", {}),
         )
 
 

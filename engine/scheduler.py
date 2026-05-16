@@ -57,12 +57,46 @@ def choose_interaction(
                 candidates.append(
                     (action, 0.5 * (ocean["extraversion"] + ocean["openness"]) / 2)
                 )
-            if romance_score >= 65 and "intimate" in INTERACTION_TYPES:
+            _both_adult = (
+                sim_a.profile.get("age", 0) >= 16
+                and sim_b.profile.get("age", 0) >= 16
+            )
+            if romance_score >= 65 and "intimate" in INTERACTION_TYPES and _both_adult:
                 for action in INTERACTION_TYPES["intimate"]:
                     candidates.append((action, 0.42 + romance_score / 250.0))
 
     for special in sim_a.skills.unlocked_interactions():
         candidates.append((special, 1.2))
+
+    # ── Interest-match bonding ────────────────────────────────────────────────
+    if datasets is not None and hasattr(datasets, "interests_data") and datasets.interests_data:
+        interests_a = set(sim_a.profile.get("interests", []))
+        interests_b = set(sim_b.profile.get("interests", []))
+        shared = interests_a & interests_b
+        solo   = interests_a - interests_b  # only sim_a has it
+
+        # Shared interest — highest weight (mutual passion)
+        if shared and random.random() < 0.25:
+            interest = random.choice(list(shared))
+            from datasets.interests import sample_interest_seed, format_interest_interaction
+            seed = sample_interest_seed(interest, datasets.interests_data)
+            if seed:
+                bonus = 0.3 if len(shared) > 1 else 0.0
+                candidates.append((
+                    format_interest_interaction(seed, sim_a.name, sim_b.name, shared=True),
+                    1.5 + bonus,
+                ))
+
+        # Solo interest — lower weight (one-sided enthusiasm)
+        elif solo and random.random() < 0.12:
+            interest = random.choice(list(solo))
+            from datasets.interests import sample_interest_seed, format_interest_interaction
+            seed = sample_interest_seed(interest, datasets.interests_data)
+            if seed:
+                candidates.append((
+                    format_interest_interaction(seed, sim_a.name, sim_b.name, shared=False),
+                    1.0,
+                ))
 
     # ── Dataset-enhanced seeds ────────────────────────────────────────────────
     if datasets is not None:
@@ -335,8 +369,14 @@ def choose_interaction(
                 )
 
         # Adult tier 1: suggestive but non-explicit intimate register
+        # Age-gated: both sims must be >= 16
+        _both_of_age = (
+            sim_a.profile.get("age", 0) >= 16
+            and sim_b.profile.get("age", 0) >= 16
+        )
         if (
             romance_score >= 65
+            and _both_of_age
             and hasattr(datasets, "sensual_patterns")
             and datasets.sensual_patterns
         ):
