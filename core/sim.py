@@ -50,6 +50,12 @@ class Sim:
         self._current_tick: int = 0
         self.lod_tier: LODTier = LODTier.ACTIVE
         self.household_id: Optional[str] = None
+        # Reputation system (Class 1)
+        self.reputation_score: float = 0.0   # -100..100; YTA events lower it
+        # Social orientation (Class 2) — circumplex theory
+        self.social_orientation: str = "Warm-Agreeable"
+        # Emotional intelligence reputation (Class 7)
+        self.ei_reputation: float = 0.0      # -50..50
 
     @property
     def ocean(self) -> dict:
@@ -89,6 +95,16 @@ class Sim:
     def tick(self, wants_engine: "WantsEngine", all_sim_ids: list[str]) -> None:
         self.needs.tick(self.ocean)
         self.emotion.tick(self.ocean)
+        # Update social orientation from current needs + emotion
+        try:
+            from datasets.social_orientation import orientation_from_ocean_needs
+            needs_dict = {n: getattr(self.needs, n) for n in
+                          ["energy", "social", "fun", "hunger"]}
+            self.social_orientation = orientation_from_ocean_needs(
+                self.ocean, needs_dict, self.emotion.dominant
+            )
+        except Exception:
+            pass
         self._want_refresh_countdown -= 1
         if self._want_refresh_countdown <= 0:
             self.active_wants = wants_engine.generate(self, all_sim_ids)

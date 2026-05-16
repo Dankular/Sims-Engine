@@ -374,6 +374,68 @@ class SimEngine:
                 target = random.choice(others)
                 self.gossip.spread(sim_a.sim_id, target.sim_id, sim_b.sim_id)
 
+        # Class 1: AITA reputation — tag negative interactions with community verdict
+        if valence < -0.3 and self._datasets and hasattr(self._datasets, "aita_index"):
+            try:
+                from datasets.aita import sample_aita_for_topic, get_verdict_delta
+                sim_state = {
+                    "emotion": sim_a.emotion.dominant,
+                    "simoleons": sim_a.simoleons,
+                    "career_performance": sim_a.career_performance,
+                }
+                entry = sample_aita_for_topic(sim_state)
+                if entry:
+                    verdict = entry.get("verdict", "UNKNOWN")
+                    delta = get_verdict_delta(verdict)
+                    sim_a.reputation_score = max(-100, min(100,
+                        sim_a.reputation_score + delta))
+                    logger.debug("[AITA] %s verdict=%s rep=%.0f",
+                                 sim_a.name, verdict, sim_a.reputation_score)
+            except Exception:
+                pass
+
+        # Class 2: Social orientation drift after interaction
+        try:
+            from datasets.social_orientation import update_orientation_after_interaction
+            sim_a.social_orientation = update_orientation_after_interaction(
+                sim_a.social_orientation, valence, emo_a, sim_a.ocean
+            )
+            sim_b.social_orientation = update_orientation_after_interaction(
+                sim_b.social_orientation, valence, emo_b, sim_b.ocean
+            )
+        except Exception:
+            pass
+
+        # Class 5: Persuasion modifier for convince interactions
+        if "[CONVINCE]" in item.interaction and self._datasets:
+            try:
+                from datasets.persuasion import compute_persuasion_modifier
+                mod = compute_persuasion_modifier(
+                    sim_a.skills.levels.get("charisma", 0),
+                    sim_b.ocean["agreeableness"],
+                    sim_b.ocean["neuroticism"],
+                    argument_delta=5.0,
+                )
+                extra_fd = round(fd * (mod - 1.0), 1)
+                rel.apply_deltas(extra_fd, 0)
+                logger.debug("[PERSUADE] %s→%s mod=%.2f extra_fd=%+.1f",
+                             sim_a.name, sim_b.name, mod, extra_fd)
+            except Exception:
+                pass
+
+        # Class 7: EI reputation update for EI scenarios
+        if "[EMOTIONAL INTELLIGENCE" in item.interaction:
+            try:
+                from datasets.emotional_intelligence import ei_reputation_delta
+                delta = ei_reputation_delta(
+                    sim_a.ocean["agreeableness"],
+                    sim_a.ocean["neuroticism"],
+                    valence,
+                )
+                sim_a.ei_reputation = max(-50, min(50, sim_a.ei_reputation + delta))
+            except Exception:
+                pass
+
         sim_a.register_action(item.interaction, self._tick_count)
 
         if self._db:
@@ -407,8 +469,18 @@ class SimEngine:
         mbti_desc = p.get("mbti_descriptor", "")
         zodiac = p.get("zodiac", "")
         zodiac_desc = p.get("zodiac_descriptor", "")
-        mbti_line = f"MBTI: {mbti} ({mbti_desc})\n" if mbti else ""
+        from datasets.social_orientation import ORIENTATION_DESCRIPTORS
+        mbti_line   = f"MBTI: {mbti} ({mbti_desc})\n" if mbti else ""
         zodiac_line = f"Zodiac: {zodiac} — {zodiac_desc}\n" if zodiac else ""
+        orientation = getattr(sim, "social_orientation", "Warm-Agreeable")
+        ori_desc    = ORIENTATION_DESCRIPTORS.get(orientation, "")
+        rep_score   = getattr(sim, "reputation_score", 0.0)
+        ei_rep      = getattr(sim, "ei_reputation", 0.0)
+        rep_note    = ""
+        if rep_score <= -30:
+            rep_note = f"Community reputation: POOR ({rep_score:.0f}) — others may avoid them.\n"
+        elif rep_score >= 40:
+            rep_note = f"Community reputation: STRONG ({rep_score:.0f}) — socially credible.\n"
         return (
             f"Name: {sim.name} | Age: {p['age']} | Gender: {p['gender']}\n"
             f"Job: {p['job']} | Diet: {p['diet']}\n"
@@ -421,8 +493,11 @@ class SimEngine:
             f"N={sim.ocean['neuroticism']}\n"
             f"{mbti_line}"
             f"{zodiac_line}"
+            f"Social orientation: {orientation} — {ori_desc}\n"
+            f"EI reputation: {ei_rep:.0f}  |  "
             f"Humor: {p['humor_type']} | Comm style: {p['comm_style']}\n"
             f"Attachment: {p['attachment']}\n"
+            f"{rep_note}"
             f"Charisma: {sim.skills.levels.get('charisma', 0):.1f}/10 | "
             f"Comedy: {sim.skills.levels.get('comedy', 0):.1f}/10\n"
             f"Current emotion: {sim.emotion.dominant} (valence={sim.emotion.dominant_valence})\n"
@@ -541,10 +616,27 @@ class SimEngine:
                 break
 
         if not fired:
-            sim_a = random.choice(self.sims)
-            others = [s for s in self.sims if s is not sim_a]
-            sim_b = random.choice(others) if others else None
-            self._run_life_event(sim_a, sim_b)
+            # 20% chance: EI scenario life event instead of generic random
+            if (self._datasets and hasattr(self._datasets, "ei_scenarios")
+                    and self._datasets.ei_scenarios and random.random() < 0.20):
+                from datasets.emotional_intelligence import sample_ei_scenario, format_ei_interaction
+                ei = sample_ei_scenario()
+                if ei:
+                    sim_a = random.choice(self.sims)
+                    others = [s for s in self.sims if s is not sim_a]
+                    sim_b = random.choice(others) if others else None
+                    self._run_life_event(
+                        sim_a, sim_b,
+                        event_type="ei_scenario",
+                        context=format_ei_interaction(ei),
+                    )
+                    fired = True
+
+            if not fired:
+                sim_a = random.choice(self.sims)
+                others = [s for s in self.sims if s is not sim_a]
+                sim_b = random.choice(others) if others else None
+                self._run_life_event(sim_a, sim_b)
 
     def _spawn_child(self, parent_a: Sim, parent_b: Sim) -> Sim:
         """Create a child sim from two partner sims and add them to the world."""

@@ -79,10 +79,30 @@ def generate_story_script(
     )
     event_summary = _build_event_summary(events)
 
+    # Class 4: Hippocorpus narrative style scaffolding
+    narrative_style = ""
+    avg_valence = sum(e.get("valence", 0) for e in events if "valence" in e)
+    if events:
+        avg_valence /= len([e for e in events if "valence" in e] or [1])
+    try:
+        from datasets.hippocorpus import sample_narrative_scaffold, get_memory_drift_note
+        sim_openness = sim_profiles[0].get("ocean", {}).get("openness", 0.5) \
+                       if sim_profiles else 0.5
+        scaffold = sample_narrative_scaffold(avg_valence, sim_openness)
+        drift_note = get_memory_drift_note(avg_valence)
+        if scaffold:
+            narrative_style = (
+                f"\nNARRATIVE STYLE GUIDE:\n{drift_note}\n"
+                f"Reference tone: \"{scaffold[:250]}\"\n"
+            )
+    except Exception:
+        pass
+
     user_prompt = (
         f"Tick {tick} — narrate these simulation events as a story:\n\n"
         f"SIMS:\n{profile_summary}\n\n"
-        f"EVENTS:\n{event_summary}\n\n"
+        f"EVENTS:\n{event_summary}\n"
+        f"{narrative_style}\n"
         "Return only the JSON script."
     )
 

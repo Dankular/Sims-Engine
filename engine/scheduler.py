@@ -92,6 +92,69 @@ def choose_interaction(
             if choice:
                 candidates.append((format_moral_choice_interaction(choice), 1.6))
 
+        # AITA / reddit-ethics — community judgment dilemma (3% chance)
+        if random.random() < 0.03 and hasattr(datasets, "aita_index") and datasets.aita_index:
+            from datasets.aita import sample_aita_for_topic
+            sim_state = {
+                "emotion": sim_a.emotion.dominant,
+                "simoleons": sim_a.simoleons,
+                "career_performance": sim_a.career_performance,
+                "romance": getattr(sim_a, "_current_romance", 0),
+            }
+            entry = sample_aita_for_topic(sim_state)
+            if entry:
+                candidates.append((
+                    f"[COMMUNITY DILEMMA] {entry['text'][:300]}\n"
+                    f"The community judged: {entry['verdict']}. "
+                    f"How does Sim A respond given their personality?",
+                    1.7,
+                ))
+
+        # EI Scenario — emotional intelligence test (3% chance)
+        if random.random() < 0.03 and hasattr(datasets, "ei_scenarios") and datasets.ei_scenarios:
+            from datasets.emotional_intelligence import sample_ei_scenario, format_ei_interaction
+            ei = sample_ei_scenario()
+            if ei:
+                candidates.append((format_ei_interaction(ei), 1.7))
+
+        # Class 3: Jokes — Comedy skill-gated (15% when comedy skill > 0)
+        comedy_skill = sim_a.skills.levels.get("comedy", 0)
+        if random.random() < 0.15 and comedy_skill > 0.5:
+            if comedy_skill >= 5 and hasattr(datasets, "dadjokes") and datasets.dadjokes:
+                from datasets.jokes import sample_dadjoke, format_dadjoke_interaction
+                dj = sample_dadjoke()
+                if dj:
+                    candidates.append((format_dadjoke_interaction(dj), 0.9 + comedy_skill * 0.1))
+            elif hasattr(datasets, "jokes_by_tier") and datasets.jokes_by_tier:
+                from datasets.jokes import sample_joke_for_skill, format_joke_interaction
+                joke = sample_joke_for_skill(comedy_skill)
+                if joke:
+                    candidates.append((format_joke_interaction(joke, comedy_skill),
+                                       0.8 + comedy_skill * 0.08))
+
+        # Class 5: Convince — Charisma-gated persuasion (4% when charisma > 3)
+        charisma = sim_a.skills.levels.get("charisma", 0)
+        if (random.random() < 0.04 and charisma >= 3
+                and hasattr(datasets, "persuasion_args") and datasets.persuasion_args):
+            from datasets.persuasion import sample_argument, format_convince_interaction
+            arg = sample_argument()
+            if arg:
+                candidates.append((format_convince_interaction(arg), 1.0 + charisma * 0.1))
+
+        # Class 6: Confession — friendship-gated (6% when friendship > 35)
+        if (random.random() < 0.06 and friendship_score >= 35
+                and hasattr(datasets, "confessions_index") and datasets.confessions_index):
+            from datasets.confessions import sample_confession, format_confession_interaction
+            fear_labels = [f.label for f in sim_a.fears]
+            confession = sample_confession(
+                sim_a.emotion.dominant, fear_labels, friendship_score
+            )
+            if confession:
+                candidates.append((
+                    format_confession_interaction(confession, friendship_score),
+                    1.5 if friendship_score >= 65 else 1.1,
+                ))
+
     # Deep support — MentalChat (friendship > 65 + target has active fears)
     if (
         datasets is not None
