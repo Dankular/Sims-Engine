@@ -134,13 +134,15 @@ class Game:
         fd = float(result.get("friendship_delta", 0))
         rd = float(result.get("romance_delta", 0))
         action = kw.get("interaction", "")
-        sign = "+" if valence >= 0 else ""
         self._add_event(
             "⚡",
-            f"{sim_a.name} → {sim_b.name}  [{action}]  "
-            f"F:{fd:+.0f} R:{rd:+.0f}  val:{sign}{valence:.2f}  \"{memory}\"",
+            f"{sim_a.name} → {sim_b.name} [{action}]  "
+            f"F:{fd:+.0f} R:{rd:+.0f}  \"{memory}\"",
             kw.get("tick", 0),
         )
+        reaction = result.get("sim_b_reaction", "")
+        if reaction:
+            self._add_event("  ", f"{sim_b.name}: \"{reaction}\"", kw.get("tick", 0))
         if result.get("reasoning"):
             self._add_story_event(result.get("reasoning", ""), is_narrator=True)
 

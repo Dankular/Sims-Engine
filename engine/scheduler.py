@@ -66,9 +66,45 @@ def choose_interaction(
         if random.random() < 0.08 and datasets.convai2_seeds:
             candidates.append((random.choice(datasets.convai2_seeds), 0.85))
 
-        # Multi-character dialogue seed (10% chance)
-        if random.random() < 0.10 and datasets.dialogue_actions:
+        # DailyDialog — venue-topic seed (12% chance, replaces generic seeds)
+        if random.random() < 0.12 and datasets.daily_dialog_index:
+            from datasets.daily_dialog import sample_for_venue
+            venue_name = getattr(sim_a, "_current_venue_name", "")
+            dd_seed = sample_for_venue(venue_name)
+            if dd_seed:
+                candidates.append((dd_seed, 0.92))
+
+        # Multi-character dialogue seed (8% chance, reduced since DailyDialog covers it)
+        elif random.random() < 0.08 and datasets.dialogue_actions:
             candidates.append((random.choice(datasets.dialogue_actions), 0.90))
+
+        # Moral dilemma — moral_stories (5% chance, high weight when triggered)
+        if random.random() < 0.05 and datasets.moral_stories:
+            from datasets.moral_stories import sample_dilemma, format_dilemma_interaction
+            dilemma = sample_dilemma()
+            if dilemma:
+                candidates.append((format_dilemma_interaction(dilemma), 1.8))
+
+        # Moral choice — ninoscherrer/moralchoice (3% chance, prefers ambiguous)
+        elif random.random() < 0.03 and datasets.moral_choice:
+            from datasets.moral_choice import sample_moral_choice, format_moral_choice_interaction
+            choice = sample_moral_choice(prefer_ambiguous=True)
+            if choice:
+                candidates.append((format_moral_choice_interaction(choice), 1.6))
+
+    # Deep support — MentalChat (friendship > 65 + target has active fears)
+    if (
+        datasets is not None
+        and hasattr(datasets, "mental_chat_index")
+        and datasets.mental_chat_index
+        and friendship_score >= 65
+        and (bool(sim_b.fears) or sim_b.profile["ocean"].get("neuroticism", 0) > 0.7)
+    ):
+        from datasets.mental_chat import sample_support_line
+        fear_labels = [f.label for f in sim_b.fears]
+        support = sample_support_line(fear_labels)
+        if support:
+            candidates.append((f"[DEEP SUPPORT] {support}", 2.0))
 
     # Vulnerable sim — prefer deep/supportive interactions
     if friendship_score >= REL_FRIEND:

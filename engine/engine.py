@@ -136,6 +136,8 @@ class SimEngine:
             if pair:
                 sim_a, sim_b = pair
                 rel = self.relationships.get(sim_a.sim_id, sim_b.sim_id)
+                # Stamp venue name on sim so scheduler can use DailyDialog topic
+                sim_a._current_venue_name = self._venue.get("name", "")
                 interaction = choose_interaction(sim_a, sim_b, rel, self._tick_count, self._datasets)
                 self._submit_interaction(sim_a, sim_b, interaction, self._venue)
 
@@ -274,8 +276,8 @@ class SimEngine:
                 self._datasets.social_norms,
                 min(3, len(self._datasets.social_norms)),
             )
-        system = build_adjudicator_system(norms)
-        context_str = get_interaction_context(interaction, sim_a, sim_b)
+        system = build_adjudicator_system(norms, datasets=self._datasets)
+        context_str = get_interaction_context(interaction, sim_a, sim_b, datasets=self._datasets)
         user_msg = self._build_user_message(
             sim_a, sim_b, interaction, rel, memories, venue, context_str
         )
@@ -587,8 +589,24 @@ class SimEngine:
                     float(result.get("friendship_delta", 0)),
                     float(result.get("romance_delta", 0)),
                 )
+            # event2Mind — secondary emotional cascade
+            narrative = result.get("narrative", "")
+            try:
+                from llm.context import get_life_event_context
+                cascade_text = get_life_event_context(event_type, narrative)
+                if cascade_text:
+                    from datasets.event2mind import emotional_cascade
+                    cascade = emotional_cascade(f"{event_type} {narrative}")
+                    # Apply secondary wants as fresh moodlets
+                    for reaction in cascade.get("xReact", [])[:1]:
+                        from config import EMOTIONS_27
+                        if reaction.lower() in EMOTIONS_27:
+                            sim_a.emotion.add(reaction.lower(), 0.5, 4, source="cascade")
+            except Exception:
+                pass
+
             logger.info(
-                "[Life Event] %s: %s", event_type, result.get("narrative", "")[:80]
+                "[Life Event] %s: %s", event_type, narrative[:80]
             )
             self._bus.emit(
                 "life_event", sim_a=sim_a, sim_b=sim_b, result=result, tick=self._tick_count

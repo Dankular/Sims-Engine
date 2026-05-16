@@ -291,15 +291,26 @@ class Renderer:
 
         y = y0 + 26
         row_h = 18
+        text_x = 70
+        max_text_w = log_w - text_x - 10
+
         for entry in game._event_log:
             if y + row_h > self.H - 4:
                 break
             tick_s = self.font_sm.render(f"[{entry['tick']:04d}]", True, C.TEXT_DIM)
             icon_s = self.font_sm.render(entry["icon"], True, C.TEXT)
-            text_s = self.font_sm.render(entry["text"][:90], True, C.TEXT)
             self.surf.blit(tick_s, (8, y))
             self.surf.blit(icon_s, (52, y))
-            self.surf.blit(text_s, (70, y))
+
+            # Truncate text to fit available width with ellipsis
+            text = entry["text"]
+            text_s = self.font_sm.render(text, True, C.TEXT)
+            if text_s.get_width() > max_text_w:
+                while text and self.font_sm.size(text + "…")[0] > max_text_w:
+                    text = text[:-1]
+                text += "…"
+                text_s = self.font_sm.render(text, True, C.TEXT)
+            self.surf.blit(text_s, (text_x, y))
             y += row_h
 
         pygame.draw.line(self.surf, C.BORDER, (log_w, y0), (log_w, self.H), 1)
