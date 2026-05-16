@@ -154,8 +154,10 @@ def main() -> None:
             save_audio=not args.no_audio_save,
         )
         tts.assign_voices([s.name for s in sims])
-        attach_story(engine, tts, llm, narrate_every=args.narrate_every)
+        _story_runner = attach_story(engine, tts, llm, narrate_every=args.narrate_every)
         print(f"[INFO] Story mode ON — TTS narration every {args.narrate_every} tick(s)\n")
+    else:
+        _story_runner = None
 
     print(f"\n[INFO] Starting simulation — {args.ticks} ticks\n")
     try:
@@ -171,6 +173,10 @@ def main() -> None:
     if engine._pending:
         print(f"\n[INFO] Draining {len(engine._pending)} pending adjudication(s)...")
         engine.flush_pending()
+
+    # Narrate any events that resolved during the drain
+    if _story_runner:
+        _story_runner.flush()
 
     print_summary(engine)
     engine.shutdown()

@@ -51,10 +51,24 @@ class TTSEngine:
     def _load(self):
         if self._tts is not None:
             return
+        import huggingface_hub.constants as _hf_const
         from supertonic import TTS
-        logger.info("Loading Supertonic TTS model...")
-        self._tts = TTS(auto_download=True)
-        logger.info("Supertonic ready.")
+
+        # ocean_scorer.py sets HF_HUB_OFFLINE=1 at import time — unset it
+        # so Supertonic can download its ONNX assets, then restore.
+        _offline_vars = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")
+        _saved_env = {k: os.environ.pop(k, None) for k in _offline_vars}
+        _saved_flag = _hf_const.HF_HUB_OFFLINE
+        _hf_const.HF_HUB_OFFLINE = False
+        try:
+            logger.info("Loading Supertonic TTS model...")
+            self._tts = TTS(auto_download=True)
+            logger.info("Supertonic ready.")
+        finally:
+            _hf_const.HF_HUB_OFFLINE = _saved_flag
+            for k, v in _saved_env.items():
+                if v is not None:
+                    os.environ[k] = v
 
     def _get_style(self, voice_name: str):
         if voice_name not in self._voice_cache:
@@ -91,12 +105,23 @@ class TTSEngine:
                 self._tts.save_audio(wav, str(out))
                 logger.debug("Saved audio: %s", out)
 
-            try:
-                import sounddevice as sd
-                import numpy as np
-                sd.play(np.array(wav), samplerate=22050, blocking=True)
-            except Exception as exc:
-                logger.warning("Audio playback failed: %s", exc)
+            # Play back: prefer the saved WAV (winsound on Windows), else sounddevice
+            played = False
+            if self._save and out.exists():
+                try:
+                    import winsound
+                    winsound.PlaySound(str(out), winsound.SND_FILENAME)
+                    played = True
+                except Exception:
+                    pass
+            if not played:
+                try:
+                    import sounddevice as sd
+                    import numpy as np
+                    audio = np.array(wav).flatten()
+                    sd.play(audio, samplerate=22050, channels=1, blocking=True)
+                except Exception as exc:
+                    logger.warning("Audio playback failed: %s", exc)
 
     def speak_script(self, segments: list[dict], tick: int = 0) -> None:
         """Play a full script [{speaker, text}, ...] sequentially."""

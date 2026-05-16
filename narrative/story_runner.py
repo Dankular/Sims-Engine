@@ -53,19 +53,12 @@ class StoryRunner:
             "type": "interaction",
             "sim_a": kw["sim_a"].name,
             "sim_b": kw["sim_b"].name,
-            "action": "",  # filled below
+            "action": kw.get("interaction", ""),
             "valence": float(kw.get("valence", 0)),
             "memory": result.get("memory_tag", ""),
             "reaction": result.get("sim_b_reaction", ""),
             "reasoning": result.get("reasoning", ""),
         })
-        # Backfill the action from pending (it was already popped by engine)
-        # Use interaction_id to match
-        iid = kw.get("interaction_id", "")
-        for item in self._engine._pending:
-            if item.interaction_id == iid:
-                self._pending_events[-1]["action"] = item.interaction
-                break
 
     def _on_career(self, **kw):
         result = kw.get("result", {})
@@ -126,6 +119,12 @@ class StoryRunner:
 
         # Speak it
         self._tts.speak_script(segments, tick=tick)
+
+
+    def flush(self) -> None:
+        """Narrate any events still pending (e.g. after flush_pending drain)."""
+        if self._pending_events:
+            self._on_tick_complete(tick=self._engine.tick_count)
 
 
 def attach(

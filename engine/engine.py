@@ -377,6 +377,7 @@ class SimEngine:
             sim_a=sim_a, sim_b=sim_b, result=result,
             valence=valence, tick=self._tick_count,
             interaction_id=item.interaction_id,
+            interaction=item.interaction,
         )
 
     @staticmethod
