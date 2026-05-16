@@ -23,12 +23,14 @@ _sbert_model = None
 def _get_sbert():
     global _sbert_model
     if _sbert_model is None and SBERT_OK:
-        try:
-            _sbert_model = _SentenceTransformer(
-                "sentence-transformers/all-MiniLM-L6-v2", local_files_only=True
-            )
-        except Exception:
-            _sbert_model = None
+        from config import HF_SENTENCE_MODEL, HF_SENTENCE_MODEL_FULL
+        for model_id in (HF_SENTENCE_MODEL, HF_SENTENCE_MODEL_FULL,
+                         "sentence-transformers/all-MiniLM-L6-v2"):
+            try:
+                _sbert_model = _SentenceTransformer(model_id, local_files_only=True)
+                break
+            except Exception:
+                continue
     return _sbert_model
 
 

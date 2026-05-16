@@ -44,6 +44,7 @@ class SimEngine:
         self,
         sims: list[Sim],
         llm: LLMBackend | None = None,
+        bg_llm: LLMBackend | None = None,
         datasets: DatasetRegistry | None = None,
         db: PersistenceBackend | None = None,
         bus: EventBus | None = None,
@@ -54,6 +55,7 @@ class SimEngine:
 
         self.sims = sims
         self._llm = llm
+        self._bg_llm = bg_llm      # smaller model for BACKGROUND tier
         self._datasets = datasets
         self._db = db
         self._bus = bus or EventBus()
@@ -127,7 +129,7 @@ class SimEngine:
         if len(background) >= 2:
             bg_a = random.choice(background)
             bg_b = random.choice([s for s in background if s is not bg_a])
-            heuristic_background_interaction(bg_a, bg_b, self.relationships)
+            heuristic_background_interaction(bg_a, bg_b, self.relationships, self._bg_llm)
 
         # Active LOD: queue one LLM interaction when the queue is empty
         active = [s for s in self.sims if s.lod_tier == LODTier.ACTIVE]
@@ -336,6 +338,21 @@ class SimEngine:
         if result.get("comedy_xp_a"):
             sim_a.skills.gain_xp("comedy", float(result["comedy_xp_a"]))
 
+        # Emotion classifier — augment LLM emotions with ModernBERT GoEmotions tags
+        memory_tag = result.get("memory_tag", item.interaction)
+        reaction_text = result.get("sim_b_reaction", "")
+        try:
+            from identity.emotion_classifier import augment_emotions
+            for sim, text, base_emo in [
+                (sim_a, memory_tag, emo_a),
+                (sim_b, reaction_text, emo_b),
+            ]:
+                extra = augment_emotions(base_emo, text)
+                for extra_emo in extra[:1]:   # add at most 1 extra emotion per sim
+                    sim.emotion.add(extra_emo, 0.4, duration=3, source="classifier")
+        except Exception:
+            pass
+
         memory_tag = result.get("memory_tag", item.interaction)
         self.memory_store.write(
             sim_a.sim_id, sim_b.sim_id, memory_tag, valence,
@@ -386,6 +403,12 @@ class SimEngine:
     @staticmethod
     def _profile_block(sim: "Sim") -> str:
         p = sim.profile
+        mbti = p.get("mbti", "")
+        mbti_desc = p.get("mbti_descriptor", "")
+        zodiac = p.get("zodiac", "")
+        zodiac_desc = p.get("zodiac_descriptor", "")
+        mbti_line = f"MBTI: {mbti} ({mbti_desc})\n" if mbti else ""
+        zodiac_line = f"Zodiac: {zodiac} — {zodiac_desc}\n" if zodiac else ""
         return (
             f"Name: {sim.name} | Age: {p['age']} | Gender: {p['gender']}\n"
             f"Job: {p['job']} | Diet: {p['diet']}\n"
@@ -396,6 +419,8 @@ class SimEngine:
             f"OCEAN: O={sim.ocean['openness']} C={sim.ocean['conscientiousness']} "
             f"E={sim.ocean['extraversion']} A={sim.ocean['agreeableness']} "
             f"N={sim.ocean['neuroticism']}\n"
+            f"{mbti_line}"
+            f"{zodiac_line}"
             f"Humor: {p['humor_type']} | Comm style: {p['comm_style']}\n"
             f"Attachment: {p['attachment']}\n"
             f"Charisma: {sim.skills.levels.get('charisma', 0):.1f}/10 | "

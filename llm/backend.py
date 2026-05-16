@@ -11,6 +11,8 @@ from config import (
     GGUF_N_CTX,
     GGUF_N_THREADS,
     GGUF_REPO,
+    GGUF_BG_REPO,
+    GGUF_BG_FILENAME,
 )
 
 _THINK_RE = re.compile(r"<think>[\s\S]*?</think>", re.IGNORECASE)
@@ -209,6 +211,32 @@ class LlamaServerBackend:
         return _THINK_RE.sub("", str(text)).strip()
 
 
+class BackgroundLLMBackend(LlamaCppBackend):
+    """Lighter 3B GGUF model for BACKGROUND LOD tier — faster, lower quality.
+
+    Runs as a second in-process model alongside the primary 9B model.
+    Shares the same llama-cpp-python thread pool but uses a smaller GGUF.
+    """
+
+    def __init__(
+        self,
+        repo_id: str = GGUF_BG_REPO,
+        filename: str = GGUF_BG_FILENAME,
+        n_ctx: int = 2048,
+        n_gpu_layers: int = GGUF_GPU_LAYERS,
+        n_threads: int | None = GGUF_N_THREADS,
+        verbose: bool = False,
+    ):
+        super().__init__(
+            repo_id=repo_id,
+            filename=filename,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            n_threads=n_threads,
+            verbose=verbose,
+        )
+
+
 def create_backend(name: str | None = None) -> LLMBackend:
     backend = (name or os.environ.get("SIM_V2_LLM_BACKEND", "llama-cpp")).lower()
     if backend == "ollama":
@@ -218,3 +246,25 @@ def create_backend(name: str | None = None) -> LLMBackend:
     if backend in {"llama-cpp", "llamacpp", "cpp"}:
         return LlamaCppBackend()
     raise ValueError(f"Unknown LLM backend: {backend}")
+
+
+def create_background_backend(name: str | None = None) -> LLMBackend | None:
+    """
+    Create the background (BACKGROUND LOD) LLM backend.
+    Returns None if disabled via env var SIM_V2_BG_LLM=0.
+    Defaults to a smaller llama-cpp model; falls back to same backend as primary.
+    """
+    if os.environ.get("SIM_V2_BG_LLM", "1") == "0":
+        return None
+    backend = (name or os.environ.get("SIM_V2_LLM_BACKEND", "llama-cpp")).lower()
+    try:
+        if backend in {"llama-cpp", "llamacpp", "cpp"}:
+            return BackgroundLLMBackend()
+        # Ollama / llama-server: reuse the same endpoint, models handle concurrency
+        return create_backend(name)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Background LLM unavailable (%s) — background sims use heuristics only.", exc
+        )
+        return None

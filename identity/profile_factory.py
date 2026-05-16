@@ -74,7 +74,11 @@ def generate_sim_profile(
         f"Can't stand {dealbreakers[0]}."
     )
 
-    return {
+    from identity.mbti import get_mbti, mbti_descriptor
+    from identity.zodiac import enrich_profile_with_zodiac
+    mbti = get_mbti(ocean, self_summary)
+
+    profile = {
         "id": sim_id,
         "name": name,
         "age": age,
@@ -98,8 +102,11 @@ def generate_sim_profile(
         "comm_style": comm_style,
         "attachment": attachment,
         "self_summary": self_summary,
+        "mbti": mbti,
+        "mbti_descriptor": mbti_descriptor(mbti),
         "parent_ids": list(parent_ids) if parent_ids else [],
     }
+    return enrich_profile_with_zodiac(profile)
 
 
 def generate_child_profile(
@@ -128,9 +135,9 @@ def generate_child_profile(
     name = f"{first_name} {last_name}"
     age = rng.randint(18, 22)
 
-    # OCEAN — blend both parents, small noise
+    # OCEAN — blend both parents with noise as the base
     ocean_keys = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
-    ocean = {
+    blended_ocean = {
         k: round(
             max(0.0, min(1.0,
                 (parent_a["ocean"][k] + parent_b["ocean"][k]) / 2
@@ -140,6 +147,8 @@ def generate_child_profile(
         )
         for k in ocean_keys
     }
+    ocean = blended_ocean
+    ocean_source = "inherited_blend"
 
     # Traits — inherit from each parent
     a_traits = parent_a.get("traits", [])
@@ -188,7 +197,18 @@ def generate_child_profile(
         f"Important to me: {aspiration.lower()} above all."
     )
 
-    return {
+    # Try short-text OCEAN scorer on self_summary — child has no essay
+    from identity.ocean_scorer import ocean_from_short_text
+    inferred_ocean = ocean_from_short_text(self_summary)
+    if inferred_ocean:
+        ocean = inferred_ocean
+        ocean_source = "personality_lm_short"
+
+    from identity.mbti import get_mbti, mbti_descriptor
+    from identity.zodiac import enrich_profile_with_zodiac
+    mbti = get_mbti(ocean, self_summary)
+
+    profile = {
         "id": sim_id,
         "name": name,
         "age": age,
@@ -196,7 +216,7 @@ def generate_child_profile(
         "city": parent_a.get("city", "Unknown"),
         "country": parent_a.get("country", "Unknown"),
         "identity_source": "child",
-        "ocean_source": "inherited",
+        "ocean_source": ocean_source,
         "gender": rng.choice(["man", "woman", "non-binary", "woman", "man"]),
         "diet": diet,
         "job": job,
@@ -210,5 +230,8 @@ def generate_child_profile(
         "comm_style": comm_style,
         "attachment": attachment,
         "self_summary": self_summary,
+        "mbti": mbti,
+        "mbti_descriptor": mbti_descriptor(mbti),
         "parent_ids": parent_ids,
     }
+    return enrich_profile_with_zodiac(profile)

@@ -121,3 +121,70 @@ def ocean_from_text(text: str | None = None) -> dict:
 
     rng = random.Random(text)
     return {k: round(rng.uniform(0.2, 0.9), 2) for k in _OCEAN_KEYS}
+
+
+# ── Child / short-text OCEAN scorer ───────────────────────────────────────────
+# Arash-Alborz/personality-trait-predictor — DistilBERT, handles short text
+_child_model = None
+_child_load_attempted = False
+
+
+def ocean_from_short_text(text: str) -> dict | None:
+    """
+    Score a short text (e.g. child's self_summary) through a lighter DistilBERT model.
+    Returns None if model is unavailable — caller should blend parent OCEAN instead.
+    """
+    global _child_model, _child_load_attempted
+    if _child_load_attempted:
+        if _child_model is None:
+            return None
+    else:
+        _child_load_attempted = True
+        import os
+        import huggingface_hub.constants as _hf_const
+        _offline_vars = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")
+        _saved_env = {k: os.environ.pop(k, None) for k in _offline_vars}
+        _saved_flag = _hf_const.HF_HUB_OFFLINE
+        _hf_const.HF_HUB_OFFLINE = False
+        try:
+            from transformers import pipeline as _hf_pipeline
+            from config import HF_CHILD_OCEAN_MODEL
+            _child_model = _hf_pipeline(
+                "text-classification", model=HF_CHILD_OCEAN_MODEL,
+                top_k=None, truncation=True, max_length=256,
+            )
+            logger.info("Child OCEAN model loaded: %s", HF_CHILD_OCEAN_MODEL)
+        except Exception as exc:
+            logger.debug("Child OCEAN model unavailable (%s)", exc)
+            _child_model = None
+        finally:
+            _hf_const.HF_HUB_OFFLINE = _saved_flag
+            for k, v in _saved_env.items():
+                if v is not None:
+                    os.environ[k] = v
+
+    if _child_model is None:
+        return None
+
+    # Label mapping varies per model checkpoint — try common patterns
+    _LABEL_ALIASES = {
+        "O": "openness", "C": "conscientiousness", "E": "extraversion",
+        "A": "agreeableness", "N": "neuroticism",
+        "openness": "openness", "conscientiousness": "conscientiousness",
+        "extraversion": "extraversion", "agreeableness": "agreeableness",
+        "neuroticism": "neuroticism",
+    }
+    try:
+        results = _child_model(text[:256])
+        scores = results[0] if isinstance(results[0], list) else results
+        ocean: dict[str, float] = {}
+        for item in scores:
+            key = _LABEL_ALIASES.get(item["label"].upper(),
+                  _LABEL_ALIASES.get(item["label"].lower()))
+            if key:
+                ocean[key] = round(float(item["score"]), 2)
+        if len(ocean) == 5:
+            return ocean
+    except Exception as exc:
+        logger.debug("Child OCEAN inference failed: %s", exc)
+    return None

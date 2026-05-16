@@ -11,8 +11,20 @@ GGUF_GPU_LAYERS = -1            # -1 = all layers on GPU; 0 = CPU-only
 GGUF_N_THREADS  = None          # None = auto
 
 # ── HuggingFace model/dataset IDs ─────────────────────────────────────────────
-HF_SENTENCE_MODEL       = "sentence-transformers/all-MiniLM-L6-v2"
+# Memory embeddings — static-retrieval-mrl is 100-400× faster on CPU
+HF_SENTENCE_MODEL       = "sentence-transformers/static-retrieval-mrl-en-v1"
+HF_SENTENCE_MODEL_FULL  = "sentence-transformers/all-mpnet-base-v2"   # higher quality fallback
 HF_PERSONALITY_MODEL    = "KevSun/Personality_LM"
+# Child / short-text OCEAN scorer (DistilBERT, no long essay needed)
+HF_CHILD_OCEAN_MODEL    = "Arash-Alborz/personality-trait-predictor"
+# Emotion classifier — ModernBERT, exactly 27 GoEmotions labels, multi-label
+HF_EMOTION_CLASSIFIER   = "cirimus/modernbert-base-go-emotions"
+HF_EMOTION_CLASSIFIER_ML = "AnasAlokla/multilingual_go_emotions"  # multilingual fallback
+# MBTI inference from text
+HF_MBTI_MODEL           = "theta/MBTI-ckiplab-bert"
+# Background LOD smaller LLM
+GGUF_BG_REPO            = "unsloth/Ministral-3B-Instruct-2410-GGUF"
+GGUF_BG_FILENAME        = "Ministral-3B-Instruct-2410-Q4_K_M.gguf"
 HF_OKCUPID_DATASET      = "SpiceeChat/OkCupid-59k-Anonymized-Profiles"
 HF_PROSOCIAL_DATASET    = "allenai/prosocial-dialog"
 HF_DIALOGUE_DATASET     = "agentlans/multi-character-dialogue"
