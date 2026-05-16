@@ -261,6 +261,18 @@ class SimEngine:
         if self._tick_count % 3 == 0:
             self._maybe_run_group_event(active)
 
+        # Gap 6: NPC ambient encounters (20% chance at crowded venues)
+        if self._venue.get("crowd", 0) >= 0.5 and active and random.random() < 0.20:
+            self._maybe_run_npc_encounter(random.choice(active))
+
+        # Gap 7: Cross-household social events (check every 15 ticks)
+        if self._tick_count % 15 == 0 and len(self.households) >= 2:
+            self._maybe_run_cross_household_event()
+
+        # Gap 8: Age-based inheritance (check every 50 ticks)
+        if self._tick_count % 50 == 0:
+            self._check_inheritance()
+
         # Life events — milestone-based first, random fallback
         if (
             self._tick_count % LIFE_EVENT_INTERVAL == 0
@@ -561,15 +573,31 @@ class SimEngine:
                 if entry:
                     verdict = entry.get("verdict", "UNKNOWN")
                     delta = get_verdict_delta(verdict)
+                    rep_before = sim_a.reputation_score
                     sim_a.reputation_score = max(
                         -100, min(100, sim_a.reputation_score + delta)
                     )
                     logger.debug(
                         "[AITA] %s verdict=%s rep=%.0f",
-                        sim_a.name,
-                        verdict,
-                        sim_a.reputation_score,
+                        sim_a.name, verdict, sim_a.reputation_score,
                     )
+                    # Gap 3: Reputation gossip propagation — scandal spreads
+                    rep_drop = rep_before - sim_a.reputation_score
+                    if rep_drop > 10:
+                        scandal = (
+                            f"{sim_a.name} was judged '{verdict}' after "
+                            f"'{item.interaction[:40]}' — community is talking"
+                        )
+                        bystanders = [
+                            s for s in self.sims
+                            if s.sim_id not in (sim_a.sim_id, sim_b.sim_id)
+                        ][:3]
+                        for bystander in bystanders:
+                            self.gossip.learn(bystander.sim_id, sim_a.sim_id, scandal)
+                        logger.info(
+                            "[SCANDAL] %s rep drop %.0f → gossip spread to %d sims",
+                            sim_a.name, rep_drop, len(bystanders),
+                        )
             except Exception:
                 pass
 
@@ -721,12 +749,26 @@ class SimEngine:
             except Exception:
                 pass
 
-        # System 4: clear goal if it was just fulfilled
+        # Gap 5: Jealousy reassurance — "reassure partner" reduces jealousy
+        if "reassure" in item.interaction.lower() and valence > 0:
+            try:
+                rel.apply_reassurance()
+                logger.debug("[JEALOUSY] %s reassured %s → score %.0f",
+                             sim_a.name, sim_b.name, rel.jealousy_score)
+            except Exception:
+                pass
+
+        # System 4 + Gap 4: mark goal achieved and clear it
         try:
-            from core.goals import is_goal_valid
+            from core.goals import is_goal_valid, mark_goal_achieved
             goal = getattr(sim_a, "_active_goal", None)
             if goal and goal.target_sim == sim_b.sim_id:
-                if goal.action_type in item.interaction.lower().replace(" ", "_") or not is_goal_valid(goal, self._tick_count):
+                # Mark achieved if the interaction matches the goal type
+                action_words = goal.action_type.replace("_", " ")
+                if action_words in item.interaction.lower() or valence > 0.4:
+                    mark_goal_achieved(sim_a)
+                    sim_a._active_goal = None
+                elif not is_goal_valid(goal, self._tick_count):
                     sim_a._active_goal = None
         except Exception:
             pass
@@ -1230,6 +1272,16 @@ class SimEngine:
                 start_grief(sim_a, target_label)
                 logger.info("[Grief] %s enters grief arc for '%s'", sim_a.name, target_label)
 
+                # Gap 8: Multi-generational grief — children of sim_b also grieve
+                if sim_b:
+                    for child in self.sims:
+                        if sim_b.sim_id in child.parent_ids and child.grief_stage < 0:
+                            start_grief(child, sim_b.name)
+                            logger.info(
+                                "[GEN-GRIEF] %s (child of %s) enters grief arc",
+                                child.name, sim_b.name,
+                            )
+
             # System 4: set intent goal toward closest friend after notable life events
             try:
                 from core.goals import set_goal_from_life_event
@@ -1310,6 +1362,90 @@ class SimEngine:
                 best_score = rec.friendship
                 best_id = other.sim_id
         return best_id
+
+    def _maybe_run_npc_encounter(self, sim: Sim) -> None:
+        """Gap 6: Spawn a one-shot ambient NPC encounter at a crowded venue."""
+        try:
+            from core.npc import NPCManager
+            if not hasattr(self, "_npc_manager"):
+                self._npc_manager = NPCManager()
+            npc = self._npc_manager.spawn()
+            outcome = self._npc_manager.heuristic_interact(sim, npc, self.relationships)
+            self.memory_store.write(
+                sim.sim_id, npc.npc_id,
+                outcome["memory_tag"], outcome["valence"], tick=self._tick_count,
+            )
+            logger.info(
+                "[NPC] %s met %s (valence=%.2f)", sim.name, npc.name, outcome["valence"]
+            )
+        except Exception as exc:
+            logger.debug("NPC encounter failed: %s", exc)
+
+    def _maybe_run_cross_household_event(self) -> None:
+        """Gap 7: Trigger a cross-household social event when 2+ households have high social need."""
+        try:
+            qualifying = []
+            for hh in self.households:
+                members = [s for s in self.sims if s.sim_id in hh.member_ids]
+                if not members:
+                    continue
+                avg_social_need = sum(s.needs.social for s in members) / len(members)
+                if avg_social_need < 70:
+                    continue
+                qualifying.append((hh, members))
+
+            if len(qualifying) < 2:
+                return
+
+            hh_a, members_a = qualifying[0]
+            hh_b, members_b = qualifying[1]
+            rep_a = random.choice(members_a)
+            rep_b = random.choice(members_b)
+
+            # Use a cross-household party interaction seeded from group_scenes if available
+            interaction = f"[CROSS-HOUSEHOLD EVENT] {hh_a.name} hosts {hh_b.name} for a social gathering"
+            self._submit_interaction(rep_a, rep_b, interaction, {
+                "name": "house party",
+                "noise": 0.8, "intimacy": 0.4, "crowd": 0.9,
+            })
+            logger.info(
+                "[CROSS-HH] %s ↔ %s social event triggered",
+                hh_a.name, hh_b.name,
+            )
+        except Exception as exc:
+            logger.debug("Cross-household event failed: %s", exc)
+
+    def _check_inheritance(self) -> None:
+        """Gap 8: Distribute simoleons to children when a parent reaches age threshold."""
+        AGE_DEATH_THRESHOLD = 75
+        try:
+            for sim in list(self.sims):
+                if sim.profile.get("age", 0) < AGE_DEATH_THRESHOLD:
+                    continue
+                if getattr(sim, "_inheritance_done", False):
+                    continue
+                children = [
+                    s for s in self.sims if sim.sim_id in s.parent_ids
+                ]
+                if not children:
+                    continue
+                share = sim.simoleons / len(children)
+                for child in children:
+                    child.simoleons += share
+                    child.emotion.add("relief", 0.5, duration=5, source="inheritance")
+                    self.memory_store.write(
+                        child.sim_id, sim.sim_id,
+                        f"inherited simoleons from {sim.name}",
+                        0.6, tick=self._tick_count,
+                    )
+                sim.simoleons = 0
+                sim._inheritance_done = True
+                logger.info(
+                    "[INHERITANCE] %s distributed §%.0f to %d children",
+                    sim.name, share * len(children), len(children),
+                )
+        except Exception as exc:
+            logger.debug("Inheritance check failed: %s", exc)
 
     def _apply_seasonal_mood(self, sim: Sim, hour: int) -> None:
         """Apply time-of-day and seasonal mood modulation (Tier 3, #11)."""

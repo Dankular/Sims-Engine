@@ -201,22 +201,26 @@ def maybe_generate_dream(sim: "Sim") -> str | None:
     if random.random() > DREAM_CHANCE:
         return None
 
-    # Nightmare: seeded from fears
+    # Nightmare: highest-severity fear (personalised, Gap 8)
     if sim.fears and random.random() < 0.5:
-        fear = random.choice(sim.fears)
+        fear = max(sim.fears, key=lambda f: f.severity)
         try:
             from datasets.hippocorpus import sample_narrative_scaffold
             scaffold = sample_narrative_scaffold(-0.7, sim.ocean.get("openness", 0.5))
             return (
-                f"[DREAM — nightmare] {sim.name} dreams about {fear.label}. "
+                f"[DREAM — nightmare] {sim.name} dreams vividly about '{fear.label}' "
+                f"(severity {fear.severity:.2f}). "
                 f"Tone: {scaffold[:150] if scaffold else 'fragmented and anxious.'}"
             )
         except Exception:
-            return f"[DREAM — nightmare] {sim.name} dreams about {fear.label}."
+            return (
+                f"[DREAM — nightmare] {sim.name} dreams about '{fear.label}' "
+                f"(severity {fear.severity:.2f})."
+            )
 
-    # Wish-fulfillment: seeded from active wants
+    # Wish-fulfillment: highest-priority active want (personalised, Gap 8)
     if sim.active_wants:
-        want = random.choice(sim.active_wants)
+        want = max(sim.active_wants, key=lambda w: w.priority)
         try:
             from datasets.hippocorpus import sample_narrative_scaffold
             scaffold = sample_narrative_scaffold(0.75, sim.ocean.get("openness", 0.5))

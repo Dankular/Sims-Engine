@@ -96,7 +96,17 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--list-voices",
         action="store_true",
-        help="List available narrator voices from el_voices.json and exit",
+        help="List available narrator voice slots and exit",
+    )
+    p.add_argument(
+        "--export-story",
+        action="store_true",
+        help="Export story chapters as JSON to exports/ directory",
+    )
+    p.add_argument(
+        "--export-chapter-size",
+        type=int, default=10,
+        help="Number of ticks per exported story chapter (default: 10)",
     )
     p.add_argument(
         "--voice-language",
@@ -265,6 +275,14 @@ def main() -> None:
     else:
         _story_runner = None
 
+    # Narrative export layer (Gap 1)
+    if args.export_story:
+        from narrative.exporter import StoryExporter
+        _exporter = StoryExporter(engine, chapter_size=args.export_chapter_size)
+        print(f"[INFO] Story export ON — chapters every {args.export_chapter_size} ticks → exports/\n")
+    else:
+        _exporter = None
+
     print(f"\n[INFO] Starting simulation — {args.ticks} ticks\n")
     try:
         for _ in range(args.ticks):
@@ -283,6 +301,10 @@ def main() -> None:
     # Narrate any events that resolved during the drain
     if _story_runner:
         _story_runner.flush()
+
+    # Flush story export
+    if _exporter:
+        _exporter.flush_now()
 
     print_summary(engine)
     engine.shutdown()

@@ -73,6 +73,58 @@ def consolidate_memories(
         tick=tick,
     )
 
+    # Gap 2 — memory valence → OCEAN drift
+    _apply_valence_ocean_drift(sim, all_memories)
+
     sim._last_consolidation_tick = tick
     logger.debug("[CONSOLIDATION] %s: %d memories → long-term", sim.name, len(top))
     return consolidated
+
+
+# Max cumulative drift from baseline per OCEAN trait
+_OCEAN_DRIFT_CAP  = 0.10
+_OCEAN_DRIFT_STEP = 0.01
+
+
+def _apply_valence_ocean_drift(sim: "Sim", memories: list[dict]) -> None:
+    """
+    Compute the average valence over all available memories and apply a tiny
+    OCEAN nudge.  Total drift is capped at ±0.10 from the baseline snapshot
+    taken at the first consolidation cycle.
+    """
+    if not memories:
+        return
+
+    valences = [m.get("valence", 0.0) for m in memories if m.get("valence") is not None]
+    if not valences:
+        return
+    avg_valence = sum(valences) / len(valences)
+
+    ocean = sim.profile["ocean"]
+
+    # Snapshot baseline on first consolidation
+    if "ocean_baseline" not in sim.profile:
+        sim.profile["ocean_baseline"] = dict(ocean)
+    baseline = sim.profile["ocean_baseline"]
+
+    def _nudge(trait: str, delta: float) -> None:
+        current = ocean[trait]
+        base    = baseline[trait]
+        # Stay within [base-cap, base+cap] AND within [0, 1]
+        new_val = current + delta
+        new_val = max(base - _OCEAN_DRIFT_CAP, min(base + _OCEAN_DRIFT_CAP, new_val))
+        new_val = max(0.0, min(1.0, new_val))
+        ocean[trait] = round(new_val, 4)
+
+    if avg_valence < -0.3:
+        _nudge("neuroticism",    +_OCEAN_DRIFT_STEP)
+        _nudge("openness",       -_OCEAN_DRIFT_STEP * 0.5)
+    elif avg_valence > 0.3:
+        _nudge("agreeableness",  +_OCEAN_DRIFT_STEP)
+        _nudge("neuroticism",    -_OCEAN_DRIFT_STEP * 0.5)
+
+    logger.debug(
+        "[OCEAN DRIFT] %s avg_valence=%.2f N=%.3f A=%.3f",
+        sim.name, avg_valence,
+        ocean["neuroticism"], ocean["agreeableness"],
+    )

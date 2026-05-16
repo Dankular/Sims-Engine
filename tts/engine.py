@@ -42,6 +42,25 @@ def _emotion_speed_modifier(emotion: str) -> float:
     return _EMOTION_SPEED.get(emotion.lower().strip(), 1.0)
 
 
+# Gap 9: num_steps delta per emotion (positive = crisper, negative = breathier/softer)
+_EMOTION_STEPS_DELTA: dict[str, int] = {
+    "grief":       -10,
+    "sadness":     -8,
+    "remorse":     -6,
+    "love":        -2,
+    "anger":       +6,
+    "excitement":  +6,
+    "joy":         +4,
+    "pride":       +4,
+    "surprise":    +4,
+    "nervousness": +2,
+}
+
+
+def _emotion_steps_delta(emotion: str) -> int:
+    return _EMOTION_STEPS_DELTA.get(emotion.lower().strip(), 0)
+
+
 # ── Voice pool ────────────────────────────────────────────────────────────────
 # Each slot gets a text description fed to OmniVoice's instruct= parameter.
 # The descriptions are distinct enough for the model to produce clearly
@@ -140,15 +159,16 @@ class TTSEngine:
                 if v is not None:
                     os.environ[k] = v
 
-    def _synthesize(self, text: str, voice_slot: str, speed: float) -> "np.ndarray | None":
+    def _synthesize(self, text: str, voice_slot: str, speed: float, num_steps: int | None = None) -> "np.ndarray | None":
         """Run OmniVoice inference. Returns a mono float32 array or None."""
         instruct = VOICE_INSTRUCT.get(voice_slot, VOICE_INSTRUCT["M1"])
+        steps = num_steps if num_steps is not None else self._num_steps
         try:
             result = self._model.generate(
                 text=text,
                 instruct=instruct,
                 speed=speed,
-                num_step=self._num_steps,
+                num_step=steps,
             )
             # generate() returns a list of arrays or a single array
             if isinstance(result, (list, tuple)):
@@ -160,7 +180,7 @@ class TTSEngine:
         except TypeError:
             # Some versions don't accept instruct= — fall back to ref_audio=None
             try:
-                result = self._model.generate(text=text, speed=speed)
+                result = self._model.generate(text=text, speed=speed, num_step=steps)
                 import numpy as np
                 arr = result[0] if isinstance(result, (list, tuple)) else result
                 return np.array(arr, dtype=np.float32).flatten()
@@ -182,13 +202,14 @@ class TTSEngine:
             else self._sim_voice_map.get(speaker, self._narrator_voice)
         )
         effective_speed = self._speed * _emotion_speed_modifier(emotion)
+        effective_steps = max(8, self._num_steps + _emotion_steps_delta(emotion))
 
         with self._lock:
             self._load()
             if self._model is None:
                 return
 
-            audio = self._synthesize(text, voice_slot, effective_speed)
+            audio = self._synthesize(text, voice_slot, effective_speed, effective_steps)
             if audio is None:
                 return
 

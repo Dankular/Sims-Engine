@@ -68,6 +68,17 @@ class RelationshipRecord:
         if self.romance > 0:
             self.romance = max(0, self.romance - 0.3)
 
+    def decay_jealousy(self, partner_had_romantic_contact: bool = False) -> None:
+        """Natural jealousy fade (Gap 5). Faster when partner stayed loyal this tick."""
+        if self.jealousy_score <= 0:
+            return
+        fade = 8.0 if partner_had_romantic_contact else 2.0
+        self.jealousy_score = max(0.0, self.jealousy_score - fade)
+
+    def apply_reassurance(self) -> None:
+        """Called when a 'reassure' interaction resolves positively."""
+        self.jealousy_score = max(0.0, self.jealousy_score - 15.0)
+
 
 class RelationshipGraph:
     def __init__(self):
@@ -88,3 +99,4 @@ class RelationshipGraph:
     def decay_all(self) -> None:
         for record in self._pairs.values():
             record.decay()
+            record.decay_jealousy()

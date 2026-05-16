@@ -48,6 +48,7 @@ class SimGoal:
     urgency: float      # 0-1; used as interaction weight bonus
     expiry_tick: int    # tick after which this goal is abandoned
     source: str         # e.g. "grief:bargaining", "life_event:loss"
+    achieved: bool = False  # set True when fulfilled before expiry
 
 
 def is_goal_valid(goal: SimGoal, current_tick: int) -> bool:
@@ -101,7 +102,26 @@ def set_goal_from_arc(
 
 
 def clear_expired_goal(sim: "Sim", current_tick: int) -> None:
-    """Remove goal if expired; called at start of each tick."""
+    """Remove goal if expired. Fires disappointment emotion on failure (Gap 4)."""
     goal = getattr(sim, "_active_goal", None)
-    if goal and not is_goal_valid(goal, current_tick):
-        sim._active_goal = None
+    if goal is None or is_goal_valid(goal, current_tick):
+        return
+    if not goal.achieved:
+        # Goal failed — emotional and personality consequence
+        sim.emotion.add("disappointment", 0.6, duration=4, source=f"goal_failed:{goal.action_type}")
+        if goal.urgency >= 0.7:
+            # High-stakes failure — mild neuroticism drift + trauma log
+            sim.profile["ocean"]["neuroticism"] = min(
+                1.0, sim.profile["ocean"]["neuroticism"] + 0.01
+            )
+            if not hasattr(sim, "trauma_events"):
+                sim.trauma_events = []
+            sim.trauma_events.append(f"failed_goal:{goal.action_type}:{goal.source}")
+    sim._active_goal = None
+
+
+def mark_goal_achieved(sim: "Sim") -> None:
+    """Call when a goal interaction is successfully resolved."""
+    goal = getattr(sim, "_active_goal", None)
+    if goal is not None:
+        goal.achieved = True

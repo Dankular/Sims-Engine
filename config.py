@@ -234,7 +234,7 @@ INTERACTION_TYPES = {
     "friendly": ["chat", "tell story", "share joke", "compliment", "ask about day"],
     "funny": ["tell joke", "do impression", "share meme", "playful tease"],
     "mean": ["insult", "mock", "argue", "spread rumour"],
-    "romantic": ["flirt", "compliment appearance", "ask on date", "hold hands", "give gift"],
+    "romantic": ["flirt", "compliment appearance", "ask on date", "hold hands", "give gift", "reassure partner"],
     "intimate": ["speak tenderly", "share private hope", "express longing"],
     "deep": ["share secret", "discuss fears", "give life advice", "confide"],
 }
