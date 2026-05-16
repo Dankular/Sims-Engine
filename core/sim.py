@@ -70,6 +70,14 @@ class Sim:
         self._burnout_recovery_ticks: int = 0
         self.trauma_events: list[str] = []
         self.action_history: dict[str, int] = {}
+        # System 4: Goal/intent persistence
+        self._active_goal = None          # Optional[SimGoal] — lazy import avoids circular
+        # System 2: Dialogue buffer (working memory)
+        self._dialogue_buffer: list[dict] = []   # last N turns with current partner
+        self._dialogue_partner: str = ""          # sim_id of current conversation partner
+        self._dialogue_last_tick: int = -999
+        # System 5: Sleep consolidation
+        self._last_consolidation_tick: int = -9999
 
     @property
     def ocean(self) -> dict:

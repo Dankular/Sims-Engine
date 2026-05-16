@@ -136,12 +136,48 @@ class SimEngine:
             # Seasonal / time-of-day mood modulation (Tier 3, #11)
             self._apply_seasonal_mood(sim, hour)
 
+            # System 4: clear expired goals, set arc-state goals
+            try:
+                from core.goals import clear_expired_goal, set_goal_from_arc
+                clear_expired_goal(sim, self._tick_count)
+                # Grief bargaining → apologise goal; depression → confide
+                if sim.grief_stage in (2, 3) and not getattr(sim, "_active_goal", None):
+                    arc_key = "grief:bargaining" if sim.grief_stage == 2 else "grief:depression"
+                    closest_id = self._find_closest_friend_id(sim)
+                    if closest_id:
+                        set_goal_from_arc(sim, arc_key, closest_id, self._tick_count)
+                # Loneliness → seek comfort goal
+                from core.arcs import is_lonely
+                if is_lonely(sim) and not getattr(sim, "_active_goal", None):
+                    closest_id = self._find_closest_friend_id(sim)
+                    if closest_id:
+                        set_goal_from_arc(sim, "loneliness", closest_id, self._tick_count)
+            except Exception:
+                pass
+
             # Dream system: fire on low-energy sleep state
             dream = maybe_generate_dream(sim)
             if dream:
                 tag = f"dream:{dream[8:50]}"
-                self.memory_store.write(sim.sim_id, sim.sim_id, tag, 0.0)
+                self.memory_store.write(sim.sim_id, sim.sim_id, tag, 0.0,
+                                        tick=self._tick_count)
                 logger.debug("[DREAM] %s: %s", sim.name, dream[:60])
+
+            # System 5: sleep-phase memory consolidation
+            try:
+                from core.consolidation import consolidate_memories, CONSOLIDATION_ENERGY_THRESHOLD
+                if sim.needs.energy <= CONSOLIDATION_ENERGY_THRESHOLD:
+                    consolidated = consolidate_memories(sim, self.memory_store, self._tick_count)
+                    if consolidated:
+                        if self._db:
+                            self._db.log_event(
+                                self._tick_count, sim.sim_id,
+                                "memory_consolidation",
+                                {"summary": consolidated[:250]},
+                            )
+                        logger.info("[CONSOLIDATION] %s: %s", sim.name, consolidated[:60])
+            except Exception:
+                pass
 
         # Shop visits for critically low needs
         from world.economy import visit_shop
@@ -359,7 +395,10 @@ class SimEngine:
         self, sim_a: Sim, sim_b: Sim, interaction: str, venue: dict
     ) -> None:
         rel = self.relationships.get(sim_a.sim_id, sim_b.sim_id)
-        memories = self.memory_store.recall(sim_a.sim_id, sim_b.sim_id)
+        # System 1: semantic recall — pass interaction as query for relevant retrieval
+        memories = self.memory_store.recall(
+            sim_a.sim_id, sim_b.sim_id, query=interaction
+        )
         norms: list[str] = []
         if self._datasets and self._datasets.social_norms:
             norms = random.sample(
@@ -369,8 +408,12 @@ class SimEngine:
         system = build_adjudicator_system(
             norms, datasets=self._datasets, interaction=interaction
         )
+        # Systems 1 + 2: inject semantic memories + dialogue buffer into context
         context_str = get_interaction_context(
-            interaction, sim_a, sim_b, datasets=self._datasets
+            interaction, sim_a, sim_b,
+            datasets=self._datasets,
+            memory_store=self.memory_store,
+            current_tick=self._tick_count,
         )
         user_msg = self._build_user_message(
             sim_a, sim_b, interaction, rel, memories, venue, context_str
@@ -460,8 +503,31 @@ class SimEngine:
             memory_tag,
             valence,
             interaction_id=item.interaction_id,
+            tick=self._tick_count,
         )
         rel.add_memory(memory_tag, valence, interaction_id=item.interaction_id)
+
+        # System 2: update dialogue buffer for both sims
+        try:
+            turn = {
+                "speaker_a": sim_a.name,
+                "speaker_b": sim_b.name,
+                "content_a": item.interaction[:100],
+                "content_b": result.get("sim_b_reaction", memory_tag)[:100],
+                "emotion_a": emo_a,
+                "emotion_b": emo_b,
+                "tick": self._tick_count,
+            }
+            _BUFFER_MAX = 6
+            for sim, partner_id in ((sim_a, sim_b.sim_id), (sim_b, sim_a.sim_id)):
+                if sim._dialogue_partner != partner_id:
+                    sim._dialogue_buffer = []
+                    sim._dialogue_partner = partner_id
+                sim._dialogue_buffer.append(turn)
+                sim._dialogue_buffer = sim._dialogue_buffer[-_BUFFER_MAX:]
+                sim._dialogue_last_tick = self._tick_count
+        except Exception:
+            pass
 
         resolve_fears(sim_a, valence)
         resolve_fears(sim_b, valence)
@@ -654,6 +720,16 @@ class SimEngine:
                 self._apply_gift_outcome(sim_a, sim_b, result)
             except Exception:
                 pass
+
+        # System 4: clear goal if it was just fulfilled
+        try:
+            from core.goals import is_goal_valid
+            goal = getattr(sim_a, "_active_goal", None)
+            if goal and goal.target_sim == sim_b.sim_id:
+                if goal.action_type in item.interaction.lower().replace(" ", "_") or not is_goal_valid(goal, self._tick_count):
+                    sim_a._active_goal = None
+        except Exception:
+            pass
 
         sim_a.register_action(item.interaction, self._tick_count)
 
@@ -1154,6 +1230,15 @@ class SimEngine:
                 start_grief(sim_a, target_label)
                 logger.info("[Grief] %s enters grief arc for '%s'", sim_a.name, target_label)
 
+            # System 4: set intent goal toward closest friend after notable life events
+            try:
+                from core.goals import set_goal_from_life_event
+                closest_id = self._find_closest_friend_id(sim_a)
+                if closest_id:
+                    set_goal_from_life_event(sim_a, event_type, closest_id, self._tick_count)
+            except Exception:
+                pass
+
         except Exception as exc:
             logger.warning("Life event failed: %s", exc)
 
@@ -1212,6 +1297,19 @@ class SimEngine:
             logger.debug("Group event failed: %s", exc)
 
     # ── Arc system helpers ────────────────────────────────────────────────────
+
+    def _find_closest_friend_id(self, sim: Sim) -> str | None:
+        """Return the sim_id of the sim with the highest friendship score, or None."""
+        best_id: str | None = None
+        best_score = -999.0
+        for other in self.sims:
+            if other.sim_id == sim.sim_id:
+                continue
+            rec = self.relationships.get(sim.sim_id, other.sim_id)
+            if rec.friendship > best_score:
+                best_score = rec.friendship
+                best_id = other.sim_id
+        return best_id
 
     def _apply_seasonal_mood(self, sim: Sim, hour: int) -> None:
         """Apply time-of-day and seasonal mood modulation (Tier 3, #11)."""

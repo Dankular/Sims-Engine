@@ -186,20 +186,20 @@ class Game:
         self._story_segments.insert(0, {"speaker": speaker, "text": text})
         self._story_segments = self._story_segments[:8]
 
-    def queue_tts(self, speaker: str, text: str, tick: int = 0) -> None:
+    def queue_tts(self, speaker: str, text: str, tick: int = 0, emotion: str = "") -> None:
         """Queue a TTS segment for background synthesis + playback."""
         if self.tts:
-            self._tts_queue.put((speaker, text, tick))
+            self._tts_queue.put((speaker, text, tick, emotion))
 
     def _tts_worker(self) -> None:
         while True:
             item = self._tts_queue.get()
             if item is None:
                 break
-            speaker, text, tick = item
+            speaker, text, tick, emotion = (*item, "") if len(item) == 3 else item
             try:
                 if self.tts:
-                    self.tts.speak(speaker, text, tick=tick)
+                    self.tts.speak(speaker, text, tick=tick, emotion=emotion)
             except Exception:
                 pass
             self._tts_queue.task_done()

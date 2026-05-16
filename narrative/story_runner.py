@@ -124,15 +124,33 @@ class StoryRunner:
             print("  [Story] No script generated.")
             return
 
+        # System 3: annotate segments with dominant emotion from events
+        dominant_emotion = ""
+        for ev in events:
+            if ev.get("type") == "interaction":
+                dominant_emotion = (
+                    self._engine._sim_lookup.get(
+                        next((s.sim_id for s in self._engine.sims if s.name == ev["sim_a"]), ""),
+                        None,
+                    )
+                )
+                if dominant_emotion and hasattr(dominant_emotion, "emotion"):
+                    dominant_emotion = dominant_emotion.emotion.dominant
+                    break
+        emotion_tagged = [
+            {**seg, "emotion": seg.get("emotion", dominant_emotion)}
+            for seg in segments
+        ]
+
         # Print script to terminal
-        for seg in segments:
+        for seg in emotion_tagged:
             speaker = seg["speaker"]
             text = seg["text"]
             tag = "📣" if speaker.lower() == "narrator" else f"💬 {speaker}"
             print(f"  {tag}: {text}")
 
         # Speak it
-        self._tts.speak_script(segments, tick=tick)
+        self._tts.speak_script(emotion_tagged, tick=tick)
 
 
     def flush(self) -> None:

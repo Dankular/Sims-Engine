@@ -18,6 +18,30 @@ from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
+# ── System 3: Emotion → speech-rate mapping ───────────────────────────────────
+# Values are multipliers applied to the base speed before synthesis.
+_EMOTION_SPEED: dict[str, float] = {
+    "grief":       0.82,
+    "sadness":     0.86,
+    "remorse":     0.84,
+    "love":        0.95,
+    "nervousness": 1.06,
+    "fear":        1.12,
+    "anger":       1.14,
+    "excitement":  1.18,
+    "joy":         1.12,
+    "surprise":    1.10,
+    "pride":       1.05,
+    "relief":      0.92,
+    "confusion":   0.98,
+}
+_EMOTION_SPEED_DEFAULT = 1.0
+
+
+def _emotion_speed_modifier(emotion: str) -> float:
+    return _EMOTION_SPEED.get(emotion.lower().strip(), _EMOTION_SPEED_DEFAULT)
+
+
 # Voice pool — narrator gets F1 by default, sims cycle through the rest
 _DEFAULT_NARRATOR_VOICE = "F1"
 _BUILTIN_VOICES = {"F1", "F2", "F3", "F4", "F5", "M1", "M2", "M3", "M4", "M5"}
@@ -122,7 +146,7 @@ class TTSEngine:
             self._narrator_ref_audio = ""
             return None
 
-    def speak(self, speaker: str, text: str, tick: int = 0) -> None:
+    def speak(self, speaker: str, text: str, tick: int = 0, emotion: str = "") -> None:
         """Synthesize and play one segment. Blocks until playback completes."""
         if not text.strip():
             return
@@ -131,6 +155,8 @@ class TTSEngine:
             if speaker.lower() == "narrator"
             else self._sim_voice_map.get(speaker, self._narrator_style_voice)
         )
+        # System 3: modulate playback speed by current emotion
+        effective_speed = self._speed * _emotion_speed_modifier(emotion)
         with self._lock:
             self._load()
             if self._tts is None:
@@ -152,7 +178,7 @@ class TTSEngine:
                     text=text,
                     voice_style=style,
                     total_steps=self._quality,
-                    speed=self._speed,
+                    speed=effective_speed,
                     lang="en",
                     **extra_kwargs,
                 )
@@ -188,6 +214,11 @@ class TTSEngine:
                     logger.warning("Audio playback failed: %s", exc)
 
     def speak_script(self, segments: list[dict], tick: int = 0) -> None:
-        """Play a full script [{speaker, text}, ...] sequentially."""
+        """Play a full script [{speaker, text, ?emotion}, ...] sequentially."""
         for seg in segments:
-            self.speak(seg["speaker"], seg["text"], tick=tick)
+            self.speak(
+                seg["speaker"],
+                seg["text"],
+                tick=tick,
+                emotion=seg.get("emotion", ""),
+            )

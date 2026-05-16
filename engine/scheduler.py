@@ -16,6 +16,20 @@ def choose_interaction(
     current_tick: int = 0,
     datasets: Optional["DatasetRegistry"] = None,
 ) -> str:
+    # ── System 4: Goal-driven interaction takes priority ──────────────────────
+    goal = getattr(sim_a, "_active_goal", None)
+    if goal is not None:
+        try:
+            from core.goals import is_goal_valid, goal_to_interaction
+            if (
+                is_goal_valid(goal, current_tick)
+                and goal.target_sim == sim_b.sim_id
+                and not sim_a.is_on_cooldown(goal.action_type, current_tick)
+            ):
+                return goal_to_interaction(goal)
+        except Exception:
+            pass
+
     friendship_score = relationship.friendship
     romance_score = relationship.romance
     mood = sim_a.emotion.dominant_valence
