@@ -50,8 +50,15 @@ def _load_pipeline(model_id: str, task: str, **kw) -> Any:
     with _hf_online():
         for local in (True, False):
             try:
-                return _p(task, model=model_id, local_files_only=local,
-                          device=-1, **kw)
+                return _p(
+                    task, model=model_id,
+                    local_files_only=local,
+                    device=-1,
+                    # Suppress the background safetensors conversion thread
+                    # which hits the HF_HUB_OFFLINE flag and logs a noisy error
+                    token=None,
+                    **kw,
+                )
             except Exception:
                 if local:
                     continue
