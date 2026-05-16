@@ -20,6 +20,10 @@ sim_state.db
 *.bin
 *.safetensors
 
+# Generated audio (TTS output)
+audio/*.wav
+audio/*.mp3
+
 # Ruff / linter
 .ruff_cache/
 

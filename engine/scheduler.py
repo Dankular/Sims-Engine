@@ -17,6 +17,7 @@ def choose_interaction(
     datasets: Optional["DatasetRegistry"] = None,
 ) -> str:
     friendship_score = relationship.friendship
+    romance_score = relationship.romance
     mood = sim_a.emotion.dominant_valence
     ocean = sim_a.ocean
     candidates: list[tuple[str, float]] = []
@@ -45,10 +46,20 @@ def choose_interaction(
             or sim_a.profile["aspiration"] == "Romance"
         )
         if is_romantic or friendship_score >= REL_FRIEND:
-            for action in INTERACTION_TYPES["romantic"]:
+            romantic_actions: list[str] = []
+            if romance_score < 30:
+                romantic_actions = ["flirt", "compliment appearance"]
+            elif romance_score < 55:
+                romantic_actions = ["flirt", "compliment appearance", "hold hands"]
+            else:
+                romantic_actions = INTERACTION_TYPES["romantic"]
+            for action in romantic_actions:
                 candidates.append(
                     (action, 0.5 * (ocean["extraversion"] + ocean["openness"]) / 2)
                 )
+            if romance_score >= 65 and "intimate" in INTERACTION_TYPES:
+                for action in INTERACTION_TYPES["intimate"]:
+                    candidates.append((action, 0.42 + romance_score / 250.0))
 
     for special in sim_a.skills.unlocked_interactions():
         candidates.append((special, 1.2))
@@ -58,7 +69,10 @@ def choose_interaction(
         # EmpathDialogues — emotion-state seed (20% chance)
         if random.random() < 0.20 and datasets.empath_index:
             from datasets.empathetic import sample_empathetic_utterance
-            empath = sample_empathetic_utterance(sim_a.emotion.dominant, datasets.empath_index)
+
+            empath = sample_empathetic_utterance(
+                sim_a.emotion.dominant, datasets.empath_index
+            )
             if empath:
                 candidates.append((empath, 0.95))
 
@@ -69,21 +83,32 @@ def choose_interaction(
         # DailyDialog — venue-topic seed (12% chance, replaces generic seeds)
         if random.random() < 0.12 and datasets.daily_dialog_index:
             from datasets.daily_dialog import sample_for_venue
+
             venue_name = getattr(sim_a, "_current_venue_name", "")
             dd_seed = sample_for_venue(venue_name)
             if dd_seed:
                 candidates.append((dd_seed, 0.92))
 
         # SODA — naturalistic social dialogue seed (12% chance, high quality)
-        if random.random() < 0.12 and hasattr(datasets, "soda_index") and datasets.soda_index:
+        if (
+            random.random() < 0.12
+            and hasattr(datasets, "soda_index")
+            and datasets.soda_index
+        ):
             from datasets.soda import sample_soda_seed
+
             soda_seed = sample_soda_seed(sim_a.emotion.dominant)
             if soda_seed:
                 candidates.append((soda_seed, 0.93))
 
         # blended_skill_talk — varied register seed (10% chance)
-        elif random.random() < 0.10 and hasattr(datasets, "blended_skill") and datasets.blended_skill:
+        elif (
+            random.random() < 0.10
+            and hasattr(datasets, "blended_skill")
+            and datasets.blended_skill
+        ):
             from datasets.blended_skill import sample_blended_utterance
+
             # Choose skill based on OCEAN
             ocean = sim_a.ocean
             if ocean["agreeableness"] > 0.6:
@@ -102,21 +127,34 @@ def choose_interaction(
 
         # Moral dilemma — moral_stories (5% chance, high weight when triggered)
         if random.random() < 0.05 and datasets.moral_stories:
-            from datasets.moral_stories import sample_dilemma, format_dilemma_interaction
+            from datasets.moral_stories import (
+                sample_dilemma,
+                format_dilemma_interaction,
+            )
+
             dilemma = sample_dilemma()
             if dilemma:
                 candidates.append((format_dilemma_interaction(dilemma), 1.8))
 
         # Moral choice — ninoscherrer/moralchoice (3% chance, prefers ambiguous)
         elif random.random() < 0.03 and datasets.moral_choice:
-            from datasets.moral_choice import sample_moral_choice, format_moral_choice_interaction
+            from datasets.moral_choice import (
+                sample_moral_choice,
+                format_moral_choice_interaction,
+            )
+
             choice = sample_moral_choice(prefer_ambiguous=True)
             if choice:
                 candidates.append((format_moral_choice_interaction(choice), 1.6))
 
         # AITA / reddit-ethics — community judgment dilemma (3% chance)
-        if random.random() < 0.03 and hasattr(datasets, "aita_index") and datasets.aita_index:
+        if (
+            random.random() < 0.03
+            and hasattr(datasets, "aita_index")
+            and datasets.aita_index
+        ):
             from datasets.aita import sample_aita_for_topic
+
             sim_state = {
                 "emotion": sim_a.emotion.dominant,
                 "simoleons": sim_a.simoleons,
@@ -125,16 +163,26 @@ def choose_interaction(
             }
             entry = sample_aita_for_topic(sim_state)
             if entry:
-                candidates.append((
-                    f"[COMMUNITY DILEMMA] {entry['text'][:300]}\n"
-                    f"The community judged: {entry['verdict']}. "
-                    f"How does Sim A respond given their personality?",
-                    1.7,
-                ))
+                candidates.append(
+                    (
+                        f"[COMMUNITY DILEMMA] {entry['text'][:300]}\n"
+                        f"The community judged: {entry['verdict']}. "
+                        f"How does Sim A respond given their personality?",
+                        1.7,
+                    )
+                )
 
         # EI Scenario — emotional intelligence test (3% chance)
-        if random.random() < 0.03 and hasattr(datasets, "ei_scenarios") and datasets.ei_scenarios:
-            from datasets.emotional_intelligence import sample_ei_scenario, format_ei_interaction
+        if (
+            random.random() < 0.03
+            and hasattr(datasets, "ei_scenarios")
+            and datasets.ei_scenarios
+        ):
+            from datasets.emotional_intelligence import (
+                sample_ei_scenario,
+                format_ei_interaction,
+            )
+
             ei = sample_ei_scenario()
             if ei:
                 candidates.append((format_ei_interaction(ei), 1.7))
@@ -142,81 +190,226 @@ def choose_interaction(
         # Class 3: Jokes — Comedy skill-gated (15% when comedy skill > 0)
         comedy_skill = sim_a.skills.levels.get("comedy", 0)
         if random.random() < 0.15 and comedy_skill > 0.5:
-            if comedy_skill >= 5 and hasattr(datasets, "dadjokes") and datasets.dadjokes:
+            if (
+                comedy_skill >= 5
+                and hasattr(datasets, "dadjokes")
+                and datasets.dadjokes
+            ):
                 from datasets.jokes import sample_dadjoke, format_dadjoke_interaction
+
                 dj = sample_dadjoke()
                 if dj:
-                    candidates.append((format_dadjoke_interaction(dj), 0.9 + comedy_skill * 0.1))
+                    candidates.append(
+                        (format_dadjoke_interaction(dj), 0.9 + comedy_skill * 0.1)
+                    )
             elif hasattr(datasets, "jokes_by_tier") and datasets.jokes_by_tier:
-                from datasets.jokes import sample_joke_for_skill, format_joke_interaction
+                from datasets.jokes import (
+                    sample_joke_for_skill,
+                    format_joke_interaction,
+                )
+
                 joke = sample_joke_for_skill(comedy_skill)
                 if joke:
-                    candidates.append((format_joke_interaction(joke, comedy_skill),
-                                       0.8 + comedy_skill * 0.08))
+                    candidates.append(
+                        (
+                            format_joke_interaction(joke, comedy_skill),
+                            0.8 + comedy_skill * 0.08,
+                        )
+                    )
 
         # Class 5: Convince — Charisma-gated persuasion (4% when charisma > 3)
         charisma = sim_a.skills.levels.get("charisma", 0)
-        if (random.random() < 0.04 and charisma >= 3
-                and hasattr(datasets, "persuasion_args") and datasets.persuasion_args):
+        if (
+            random.random() < 0.04
+            and charisma >= 3
+            and hasattr(datasets, "persuasion_args")
+            and datasets.persuasion_args
+        ):
             from datasets.persuasion import sample_argument, format_convince_interaction
+
             arg = sample_argument()
             if arg:
-                candidates.append((format_convince_interaction(arg), 1.0 + charisma * 0.1))
+                candidates.append(
+                    (format_convince_interaction(arg), 1.0 + charisma * 0.1)
+                )
 
         # Class 6: Confession — friendship-gated (6% when friendship > 35)
-        if (random.random() < 0.06 and friendship_score >= 35
-                and hasattr(datasets, "confessions_index") and datasets.confessions_index):
-            from datasets.confessions import sample_confession, format_confession_interaction
+        if (
+            random.random() < 0.06
+            and friendship_score >= 35
+            and hasattr(datasets, "confessions_index")
+            and datasets.confessions_index
+        ):
+            from datasets.confessions import (
+                sample_confession,
+                format_confession_interaction,
+            )
+
             fear_labels = [f.label for f in sim_a.fears]
             confession = sample_confession(
                 sim_a.emotion.dominant, fear_labels, friendship_score
             )
             if confession:
-                candidates.append((
-                    format_confession_interaction(confession, friendship_score),
-                    1.5 if friendship_score >= 65 else 1.1,
-                ))
+                candidates.append(
+                    (
+                        format_confession_interaction(confession, friendship_score),
+                        1.5 if friendship_score >= 65 else 1.1,
+                    )
+                )
+
+        # Self-disclosure depth curve — stage-appropriate confiding
+        if (
+            random.random() < 0.06
+            and friendship_score >= 20
+            and hasattr(datasets, "self_disclosure_depth")
+            and datasets.self_disclosure_depth
+        ):
+            from datasets.self_disclosure import sample_by_depth
+
+            disclosure, depth = sample_by_depth(friendship_score)
+            if disclosure:
+                note = ""
+                if depth == "deep" and friendship_score < 40:
+                    note = " Early over-disclosure risk: embarrassment and friendship penalty likely."
+                elif depth == "surface" and friendship_score >= 65:
+                    note = " At this closeness, under-disclosure can feel avoidant and reduce warmth."
+                candidates.append(
+                    (
+                        f"[SELF-DISCLOSURE — {depth.upper()}]\n"
+                        f'Sim A shares: "{disclosure[:260]}"\n'
+                        f"Adjudicate trust fit for current friendship tier.{note}",
+                        1.2 if depth != "deep" else 1.5,
+                    )
+                )
+
+        # Romance dataset grounding — flirtflip tiers + charisma rizz unlock
+        if friendship_score >= REL_ACQUAINTANCE and hasattr(
+            datasets, "flirtflip_index"
+        ):
+            from datasets.romance import sample_flirt_line, sample_rizz_intro
+
+            line, tier = sample_flirt_line(romance_score)
+            charisma = sim_a.skills.levels.get("charisma", 0)
+            if line:
+                early_bold_risk = ""
+                if tier == "bold" and romance_score < (45 if charisma >= 7 else 55):
+                    early_bold_risk = (
+                        " Early escalation risk: if Sim B has low agreeableness, "
+                        "annoyance/disgust is likely."
+                    )
+                candidates.append(
+                    (
+                        f"[ROMANCE — {tier.upper()}]\n"
+                        f'Sim A attempts: "{line}"\n'
+                        f"Style is tiered by romance score ({romance_score:.0f}).{early_bold_risk}",
+                        0.95 + (romance_score / 180),
+                    )
+                )
+            if charisma >= 7 and random.random() < 0.20:
+                rizz = sample_rizz_intro()
+                if rizz:
+                    candidates.append(
+                        (
+                            f"[ENCHANTING INTRODUCTION]\n"
+                            f'Sim A delivers a high-chemistry opening: "{rizz[:220]}"',
+                            1.6,
+                        )
+                    )
+
+        # Partners-state attachment dynamics (INTIMA)
+        if (
+            romance_score >= 80
+            and hasattr(datasets, "intima_codes")
+            and datasets.intima_codes
+        ):
+            from datasets.intimacy import sample_intima
+
+            prompt = sample_intima(sim_a.profile.get("attachment", "general"))
+            if prompt:
+                candidates.append(
+                    (
+                        f"[PARTNERS DYNAMICS]\n"
+                        f"Attachment-aware interaction seed: {prompt[:320]}",
+                        1.35,
+                    )
+                )
+
+        # Adult tier 1: suggestive but non-explicit intimate register
+        if (
+            romance_score >= 65
+            and hasattr(datasets, "sensual_patterns")
+            and datasets.sensual_patterns
+        ):
+            line = random.choice(datasets.sensual_patterns)
+            candidates.append(
+                (
+                    f"[INTIMATE — SUGGESTIVE]\n{line[:260]}",
+                    1.1,
+                )
+            )
 
         # Gap 1: Debate — logic skill-gated (8% when logic >= 3)
         logic_skill = sim_a.skills.levels.get("logic", 0)
         if random.random() < 0.08 and logic_skill >= 3:
             if hasattr(datasets, "debate_index") and datasets.debate_index:
-                from datasets.debate import sample_debate_argument, format_debate_interaction
+                from datasets.debate import (
+                    sample_debate_argument,
+                    format_debate_interaction,
+                )
+
                 arg = sample_debate_argument(logic_skill)
                 if arg:
-                    candidates.append((
-                        format_debate_interaction(arg, logic_skill),
-                        1.0 + logic_skill * 0.12,
-                    ))
+                    candidates.append(
+                        (
+                            format_debate_interaction(arg, logic_skill),
+                            1.0 + logic_skill * 0.12,
+                        )
+                    )
 
         # Gap 2: Cooking — skill-gated (8% when cooking >= 3)
         cooking_skill = sim_a.skills.levels.get("cooking", 0)
         if random.random() < 0.08 and cooking_skill >= 3:
             if hasattr(datasets, "cooking_dialogs") and datasets.cooking_dialogs:
                 from datasets.cooking import sample_recipe, format_cooking_interaction
+
                 recipe = sample_recipe(cooking_skill)
                 if recipe:
                     guest_diets = [sim_b.profile.get("diet", "omnivore")]
-                    candidates.append((
-                        format_cooking_interaction(recipe, cooking_skill, guest_diets),
-                        1.0 + cooking_skill * 0.08,
-                    ))
+                    candidates.append(
+                        (
+                            format_cooking_interaction(
+                                recipe, cooking_skill, guest_diets
+                            ),
+                            1.0 + cooking_skill * 0.08,
+                        )
+                    )
 
         # Gap 3: Creativity — skill-gated (10% when creativity >= 2)
         creativity_skill = sim_a.skills.levels.get("creativity", 0)
         if random.random() < 0.10 and creativity_skill >= 2:
             if hasattr(datasets, "creative_works") and datasets.creative_works:
-                from datasets.creative_works import sample_creative_work, format_creative_interaction
+                from datasets.creative_works import (
+                    sample_creative_work,
+                    format_creative_interaction,
+                )
+
                 work = sample_creative_work(creativity_skill)
                 if work:
-                    candidates.append((
-                        format_creative_interaction(work, creativity_skill),
-                        1.0 + creativity_skill * 0.1,
-                    ))
+                    candidates.append(
+                        (
+                            format_creative_interaction(work, creativity_skill),
+                            1.0 + creativity_skill * 0.1,
+                        )
+                    )
 
         # Gap 4: Manipulation — toxic initiator (5% when conditions met)
         if random.random() < 0.05 and hasattr(datasets, "manipulation_index"):
-            from datasets.manipulation import is_toxic_initiator, sample_manipulation, format_manipulation_interaction
+            from datasets.manipulation import (
+                is_toxic_initiator,
+                sample_manipulation,
+                format_manipulation_interaction,
+            )
+
             if is_toxic_initiator(sim_a):
                 manip = sample_manipulation()
                 if manip:
@@ -226,26 +419,36 @@ def choose_interaction(
         fitness_skill = sim_a.skills.levels.get("fitness", 0)
         if random.random() < 0.08 and fitness_skill >= 1:
             if hasattr(datasets, "fitness_content") and datasets.fitness_content:
-                from datasets.fitness import sample_fitness_content, format_fitness_interaction
+                from datasets.fitness import (
+                    sample_fitness_content,
+                    format_fitness_interaction,
+                )
+
                 item = sample_fitness_content(fitness_skill)
                 if item:
                     fitness_b = sim_b.skills.levels.get("fitness", 0)
-                    candidates.append((
-                        format_fitness_interaction(item, fitness_skill, fitness_b),
-                        1.0 + fitness_skill * 0.08,
-                    ))
+                    candidates.append(
+                        (
+                            format_fitness_interaction(item, fitness_skill, fitness_b),
+                            1.0 + fitness_skill * 0.08,
+                        )
+                    )
 
         # Travel interest — 15% when sim_a has "travel" interest
-        if ("travel" in sim_a.profile.get("interests", [])
-                and random.random() < 0.15
-                and hasattr(datasets, "travel_content")
-                and datasets.travel_content):
+        if (
+            "travel" in sim_a.profile.get("interests", [])
+            and random.random() < 0.15
+            and hasattr(datasets, "travel_content")
+            and datasets.travel_content
+        ):
             from datasets.travel import sample_travel_seed, format_travel_interaction
+
             seed = sample_travel_seed()
             if seed:
                 both = "travel" in sim_b.profile.get("interests", [])
-                candidates.append((format_travel_interaction(seed, both),
-                                   1.6 if both else 1.0))
+                candidates.append(
+                    (format_travel_interaction(seed, both), 1.6 if both else 1.0)
+                )
 
         # Reminisce — unlocked at friendship >= 65 AND memories >= 5
         if friendship_score >= 65 and datasets is not None:
@@ -257,40 +460,67 @@ def choose_interaction(
             # We don't have the rel here directly, but we can check via a helper
             if hasattr(datasets, "nostalgia_templates"):
                 from datasets.nostalgia import (
-                    REMINISCE_FRIENDSHIP_MIN, REMINISCE_MEMORY_MIN,
-                    sample_reminisce_template, format_reminisce_interaction,
+                    REMINISCE_FRIENDSHIP_MIN,
+                    REMINISCE_MEMORY_MIN,
+                    sample_reminisce_template,
+                    format_reminisce_interaction,
                 )
-                if friendship_score >= REMINISCE_FRIENDSHIP_MIN and random.random() < 0.10:
+
+                if (
+                    friendship_score >= REMINISCE_FRIENDSHIP_MIN
+                    and random.random() < 0.10
+                ):
                     template = sample_reminisce_template()
                     # shared memories will be filled by engine; pass empty for now
-                    candidates.append((
-                        format_reminisce_interaction(template, []),
-                        2.2,   # highest weight — strongest bonding action
-                    ))
+                    candidates.append(
+                        (
+                            format_reminisce_interaction(template, []),
+                            2.2,  # highest weight — strongest bonding action
+                        )
+                    )
 
         # Reconciliation — post-toxic cycle (8% chance when applicable)
-        if (hasattr(datasets, "counsel_chat") and datasets.counsel_chat
-                and random.random() < 0.08):
+        if (
+            hasattr(datasets, "counsel_chat")
+            and datasets.counsel_chat
+            and random.random() < 0.08
+        ):
             from datasets.reconciliation import (
-                sample_counsel_exchange, format_reconciliation_interaction,
-                RECONCILIATION_FRIENDSHIP_MIN, RECONCILIATION_FRIENDSHIP_MAX,
+                sample_counsel_exchange,
+                format_reconciliation_interaction,
+                RECONCILIATION_FRIENDSHIP_MIN,
+                RECONCILIATION_FRIENDSHIP_MAX,
             )
-            if RECONCILIATION_FRIENDSHIP_MIN <= friendship_score <= RECONCILIATION_FRIENDSHIP_MAX:
+
+            if (
+                RECONCILIATION_FRIENDSHIP_MIN
+                <= friendship_score
+                <= RECONCILIATION_FRIENDSHIP_MAX
+            ):
                 exchange = sample_counsel_exchange()
-                candidates.append((
-                    format_reconciliation_interaction(
-                        exchange, sim_a.name, sim_b.name, friendship_score
-                    ),
-                    1.8,
-                ))
+                candidates.append(
+                    (
+                        format_reconciliation_interaction(
+                            exchange, sim_a.name, sim_b.name, friendship_score
+                        ),
+                        1.8,
+                    )
+                )
 
         # Gap 6: Financial stress seeds (10% when simoleons < threshold)
         from config import LOW_FUNDS_THRESHOLD
-        if (sim_a.simoleons < LOW_FUNDS_THRESHOLD
-                and random.random() < 0.10
-                and hasattr(datasets, "finance_questions")
-                and datasets.finance_questions):
-            from datasets.finance import sample_financial_stress_seed, format_financial_seed
+
+        if (
+            sim_a.simoleons < LOW_FUNDS_THRESHOLD
+            and random.random() < 0.10
+            and hasattr(datasets, "finance_questions")
+            and datasets.finance_questions
+        ):
+            from datasets.finance import (
+                sample_financial_stress_seed,
+                format_financial_seed,
+            )
+
             seed = sample_financial_stress_seed(sim_a.simoleons)
             if seed:
                 candidates.append((format_financial_seed(seed), 1.2))
@@ -304,6 +534,7 @@ def choose_interaction(
         and (bool(sim_b.fears) or sim_b.profile["ocean"].get("neuroticism", 0) > 0.7)
     ):
         from datasets.mental_chat import sample_support_line
+
         fear_labels = [f.label for f in sim_b.fears]
         support = sample_support_line(fear_labels)
         if support:

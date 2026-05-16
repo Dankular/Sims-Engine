@@ -51,11 +51,12 @@ class SimEngine:
     ) -> None:
         if llm is None:
             from llm.backend import LlamaCppBackend
+
             llm = LlamaCppBackend()
 
         self.sims = sims
         self._llm = llm
-        self._bg_llm = bg_llm      # smaller model for BACKGROUND tier
+        self._bg_llm = bg_llm  # smaller model for BACKGROUND tier
         self._datasets = datasets
         self._db = db
         self._bus = bus or EventBus()
@@ -74,6 +75,7 @@ class SimEngine:
         self._audio_sensor = AudioEnvironmentSensor()
         self._venue: dict = {**random.choice(VENUES), **self._audio_sensor.sense()}
         self.households: list = []
+        self._relationship_story_arcs: dict[tuple[str, str], dict[str, object]] = {}
 
         self._bus.on("tick_complete", self._on_tick_complete)
         assign_lod_tiers(self.sims)
@@ -95,11 +97,14 @@ class SimEngine:
             except Exception as exc:
                 logger.warning(
                     "Adjudicator failed for %s→%s: %s",
-                    item.sim_a_id, item.sim_b_id, exc,
+                    item.sim_a_id,
+                    item.sim_b_id,
+                    exc,
                 )
 
         # Tick all sims — DORMANT gets minimal decay only (no full tick)
         from config import NEEDS_DECAY
+
         for sim in self.sims:
             if sim.lod_tier == LODTier.DORMANT:
                 sim.needs.hunger = max(0, sim.needs.hunger - NEEDS_DECAY * 0.5)
@@ -111,6 +116,7 @@ class SimEngine:
         # Shop visits for critically low needs
         from world.economy import visit_shop
         from config import SHOP_DEFS, LOW_NEED_SHOP_THRESHOLD
+
         for sim in self.sims:
             if sim.lod_tier == LODTier.DORMANT:
                 continue
@@ -129,7 +135,9 @@ class SimEngine:
         if len(background) >= 2:
             bg_a = random.choice(background)
             bg_b = random.choice([s for s in background if s is not bg_a])
-            heuristic_background_interaction(bg_a, bg_b, self.relationships, self._bg_llm)
+            heuristic_background_interaction(
+                bg_a, bg_b, self.relationships, self._bg_llm
+            )
 
         # Active LOD: queue one LLM interaction when the queue is empty
         active = [s for s in self.sims if s.lod_tier == LODTier.ACTIVE]
@@ -140,40 +148,55 @@ class SimEngine:
                 rel = self.relationships.get(sim_a.sim_id, sim_b.sim_id)
                 # Stamp venue name on sim so scheduler can use DailyDialog topic
                 sim_a._current_venue_name = self._venue.get("name", "")
-                interaction = choose_interaction(sim_a, sim_b, rel, self._tick_count, self._datasets)
+                interaction = choose_interaction(
+                    sim_a, sim_b, rel, self._tick_count, self._datasets
+                )
                 self._submit_interaction(sim_a, sim_b, interaction, self._venue)
 
         # Venue rotation every 10 ticks with updated audio sensor
         if self._tick_count % 10 == 0:
             self._venue = {**random.choice(VENUES), **self._audio_sensor.sense()}
-            logger.info("[Tick %d] Venue → %s (ambient: %s)", self._tick_count, self._venue["name"], self._audio_sensor.current_class)
+            logger.info(
+                "[Tick %d] Venue → %s (ambient: %s)",
+                self._tick_count,
+                self._venue["name"],
+                self._audio_sensor.current_class,
+            )
 
         # Periodic relationship decay
         if self._tick_count % 10 == 0:
             self.relationships.decay_all()
 
         # Career events
-        if self._tick_count % CAREER_EVENT_INTERVAL == 0 and random.random() < CAREER_EVENT_CHANCE:
+        if (
+            self._tick_count % CAREER_EVENT_INTERVAL == 0
+            and random.random() < CAREER_EVENT_CHANCE
+        ):
             self._run_career_event(random.choice(self.sims))
 
         # Health scare life events — triggered by chronic low energy
         from datasets.health import HEALTH_SCARE_TICK_COUNT
+
         for sim in self.sims:
             if getattr(sim, "_low_energy_ticks", 0) >= HEALTH_SCARE_TICK_COUNT:
-                sim._low_energy_ticks = 0   # reset counter
+                sim._low_energy_ticks = 0  # reset counter
                 self._run_life_event(
-                    sim, None,
+                    sim,
+                    None,
                     event_type="health_scare",
                     context=None,
                 )
-                break   # one health scare per tick
+                break  # one health scare per tick
 
         # Group event — high-crowd venue with 3+ ACTIVE sims
         if self._tick_count % 3 == 0:
             self._maybe_run_group_event(active)
 
         # Life events — milestone-based first, random fallback
-        if self._tick_count % LIFE_EVENT_INTERVAL == 0 and random.random() < LIFE_EVENT_CHANCE:
+        if (
+            self._tick_count % LIFE_EVENT_INTERVAL == 0
+            and random.random() < LIFE_EVENT_CHANCE
+        ):
             self._check_life_events()
 
         # Gossip spread
@@ -183,7 +206,9 @@ class SimEngine:
             receiver = random.choice(rest)
             subjects = [s for s in rest if s is not receiver]
             if subjects and random.random() < GOSSIP_SPREAD_CHANCE:
-                self.gossip.spread(spreader.sim_id, receiver.sim_id, random.choice(subjects).sim_id)
+                self.gossip.spread(
+                    spreader.sim_id, receiver.sim_id, random.choice(subjects).sim_id
+                )
 
         # Autosave
         if self._db and self._tick_count % 5 == 0:
@@ -207,31 +232,43 @@ class SimEngine:
                     "romance": round(rec.romance, 1),
                     "state": rec.state_label(),
                 }
-            sims_out.append({
-                "id": sim.sim_id,
-                "name": sim.name,
-                "job": sim.profile["job"],
-                "simoleons": round(sim.simoleons, 2),
-                "career_performance": round(sim.career_performance, 1),
-                "lod_tier": sim.lod_tier.name,
-                "dominant_emotion": sim.emotion.dominant,
-                "dominant_valence": sim.emotion.dominant_valence,
-                "needs": {
-                    n: round(getattr(sim.needs, n), 1)
-                    for n in ["hunger", "energy", "social", "fun", "hygiene", "environment", "bladder", "comfort"]
-                },
-                "emotion": sim.emotion.dominant,
-                "valence": sim.emotion.dominant_valence,
-                "active_wants": [w.description for w in sim.active_wants],
-                "fears": [f.label for f in sim.fears],
-                "skills": sim.skills.levels,
-                "ocean": sim.profile["ocean"],
-                "household_id": sim.household_id,
-                "parent_ids": sim.parent_ids,
-                "relationships": rels,
-            })
+            sims_out.append(
+                {
+                    "id": sim.sim_id,
+                    "name": sim.name,
+                    "job": sim.profile["job"],
+                    "simoleons": round(sim.simoleons, 2),
+                    "career_performance": round(sim.career_performance, 1),
+                    "lod_tier": sim.lod_tier.name,
+                    "dominant_emotion": sim.emotion.dominant,
+                    "dominant_valence": sim.emotion.dominant_valence,
+                    "needs": {
+                        n: round(getattr(sim.needs, n), 1)
+                        for n in [
+                            "hunger",
+                            "energy",
+                            "social",
+                            "fun",
+                            "hygiene",
+                            "environment",
+                            "bladder",
+                            "comfort",
+                        ]
+                    },
+                    "emotion": sim.emotion.dominant,
+                    "valence": sim.emotion.dominant_valence,
+                    "active_wants": [w.description for w in sim.active_wants],
+                    "fears": [f.label for f in sim.fears],
+                    "skills": sim.skills.levels,
+                    "ocean": sim.profile["ocean"],
+                    "household_id": sim.household_id,
+                    "parent_ids": sim.parent_ids,
+                    "relationships": rels,
+                }
+            )
         hour = (GAME_START_HOUR + self._tick_count) % 24
         from world.schedule import time_label
+
         return {
             "tick": self._tick_count,
             "hour": hour,
@@ -273,7 +310,9 @@ class SimEngine:
                 except Exception as exc:
                     logger.warning(
                         "Adjudicator failed for %s→%s: %s",
-                        item.sim_a_id, item.sim_b_id, exc,
+                        item.sim_a_id,
+                        item.sim_b_id,
+                        exc,
                     )
 
     def shutdown(self) -> None:
@@ -294,8 +333,12 @@ class SimEngine:
                 self._datasets.social_norms,
                 min(3, len(self._datasets.social_norms)),
             )
-        system = build_adjudicator_system(norms, datasets=self._datasets)
-        context_str = get_interaction_context(interaction, sim_a, sim_b, datasets=self._datasets)
+        system = build_adjudicator_system(
+            norms, datasets=self._datasets, interaction=interaction
+        )
+        context_str = get_interaction_context(
+            interaction, sim_a, sim_b, datasets=self._datasets
+        )
         user_msg = self._build_user_message(
             sim_a, sim_b, interaction, rel, memories, venue, context_str
         )
@@ -316,12 +359,19 @@ class SimEngine:
         iid = self._pending[-1].interaction_id
         logger.info(
             "[Tick %d] Queued [%s]: %s → %s (%s)",
-            self._tick_count, iid, sim_a.name, sim_b.name, interaction,
+            self._tick_count,
+            iid,
+            sim_a.name,
+            sim_b.name,
+            interaction,
         )
         self._bus.emit(
             "interaction_queued",
-            sim_a=sim_a, sim_b=sim_b, interaction=interaction,
-            interaction_id=iid, tick=self._tick_count,
+            sim_a=sim_a,
+            sim_b=sim_b,
+            interaction=interaction,
+            interaction_id=iid,
+            tick=self._tick_count,
         )
 
     def _apply_resolved(self, item: PendingInteraction, result: dict) -> None:
@@ -359,33 +409,41 @@ class SimEngine:
         reaction_text = result.get("sim_b_reaction", "")
         try:
             from identity.emotion_classifier import augment_emotions
+
             for sim, text, base_emo in [
                 (sim_a, memory_tag, emo_a),
                 (sim_b, reaction_text, emo_b),
             ]:
                 extra = augment_emotions(base_emo, text)
-                for extra_emo in extra[:1]:   # add at most 1 extra emotion per sim
+                for extra_emo in extra[:1]:  # add at most 1 extra emotion per sim
                     sim.emotion.add(extra_emo, 0.4, duration=3, source="classifier")
         except Exception:
             pass
 
         memory_tag = result.get("memory_tag", item.interaction)
         self.memory_store.write(
-            sim_a.sim_id, sim_b.sim_id, memory_tag, valence,
+            sim_a.sim_id,
+            sim_b.sim_id,
+            memory_tag,
+            valence,
             interaction_id=item.interaction_id,
         )
         rel.add_memory(memory_tag, valence, interaction_id=item.interaction_id)
 
         resolve_fears(sim_a, valence)
         resolve_fears(sim_b, valence)
-        new_fear = self.wants_engine.check_fear_acquisition(sim_a, item.interaction, valence)
+        new_fear = self.wants_engine.check_fear_acquisition(
+            sim_a, item.interaction, valence
+        )
         if new_fear and new_fear not in sim_a.fears:
             sim_a.fears.append(new_fear)
 
         self.gossip.learn(sim_a.sim_id, sim_b.sim_id, memory_tag)
         self.gossip.learn(sim_b.sim_id, sim_a.sim_id, memory_tag)
         if rel.friendship >= 45 and random.random() < GOSSIP_SPREAD_CHANCE:
-            others = [s for s in self.sims if s.sim_id not in (sim_a.sim_id, sim_b.sim_id)]
+            others = [
+                s for s in self.sims if s.sim_id not in (sim_a.sim_id, sim_b.sim_id)
+            ]
             if others:
                 target = random.choice(others)
                 self.gossip.spread(sim_a.sim_id, target.sim_id, sim_b.sim_id)
@@ -394,6 +452,7 @@ class SimEngine:
         if valence < -0.3 and self._datasets and hasattr(self._datasets, "aita_index"):
             try:
                 from datasets.aita import sample_aita_for_topic, get_verdict_delta
+
                 sim_state = {
                     "emotion": sim_a.emotion.dominant,
                     "simoleons": sim_a.simoleons,
@@ -403,16 +462,22 @@ class SimEngine:
                 if entry:
                     verdict = entry.get("verdict", "UNKNOWN")
                     delta = get_verdict_delta(verdict)
-                    sim_a.reputation_score = max(-100, min(100,
-                        sim_a.reputation_score + delta))
-                    logger.debug("[AITA] %s verdict=%s rep=%.0f",
-                                 sim_a.name, verdict, sim_a.reputation_score)
+                    sim_a.reputation_score = max(
+                        -100, min(100, sim_a.reputation_score + delta)
+                    )
+                    logger.debug(
+                        "[AITA] %s verdict=%s rep=%.0f",
+                        sim_a.name,
+                        verdict,
+                        sim_a.reputation_score,
+                    )
             except Exception:
                 pass
 
         # Class 2: Social orientation drift after interaction
         try:
             from datasets.social_orientation import update_orientation_after_interaction
+
             sim_a.social_orientation = update_orientation_after_interaction(
                 sim_a.social_orientation, valence, emo_a, sim_a.ocean
             )
@@ -426,6 +491,7 @@ class SimEngine:
         if "[CONVINCE]" in item.interaction and self._datasets:
             try:
                 from datasets.persuasion import compute_persuasion_modifier
+
                 mod = compute_persuasion_modifier(
                     sim_a.skills.levels.get("charisma", 0),
                     sim_b.ocean["agreeableness"],
@@ -434,8 +500,13 @@ class SimEngine:
                 )
                 extra_fd = round(fd * (mod - 1.0), 1)
                 rel.apply_deltas(extra_fd, 0)
-                logger.debug("[PERSUADE] %s→%s mod=%.2f extra_fd=%+.1f",
-                             sim_a.name, sim_b.name, mod, extra_fd)
+                logger.debug(
+                    "[PERSUADE] %s→%s mod=%.2f extra_fd=%+.1f",
+                    sim_a.name,
+                    sim_b.name,
+                    mod,
+                    extra_fd,
+                )
             except Exception:
                 pass
 
@@ -443,6 +514,7 @@ class SimEngine:
         if "[EMOTIONAL INTELLIGENCE" in item.interaction:
             try:
                 from datasets.emotional_intelligence import ei_reputation_delta
+
                 delta = ei_reputation_delta(
                     sim_a.ocean["agreeableness"],
                     sim_a.ocean["neuroticism"],
@@ -456,21 +528,27 @@ class SimEngine:
         if "[CREATIVE WORK" in item.interaction:
             try:
                 from datasets.creative_works import creative_reputation_delta
+
                 delta = creative_reputation_delta(
                     valence,
                     sim_b.ocean.get("openness", 0.5),
                     sim_a.skills.levels.get("creativity", 0),
                 )
-                sim_a.creative_reputation = max(0, min(100, sim_a.creative_reputation + delta))
+                sim_a.creative_reputation = max(
+                    0, min(100, sim_a.creative_reputation + delta)
+                )
             except Exception:
                 pass
 
         # Gap 4: Toxic cycle detection and phase tracking
         try:
             from datasets.manipulation import (
-                is_toxic_initiator, is_toxic_target,
-                next_toxic_phase, CYCLE_PHASES,
+                is_toxic_initiator,
+                is_toxic_target,
+                next_toxic_phase,
+                CYCLE_PHASES,
             )
+
             if is_toxic_initiator(sim_a) and is_toxic_target(sim_b):
                 if 40 <= rel.friendship <= 70:
                     if not rel.in_toxic_cycle:
@@ -483,15 +561,28 @@ class SimEngine:
                         rel.apply_deltas(phase_delta, 0)
                         rel.toxic_cycle_phase = next_phase
                         rel.toxic_cycle_tick = self._tick_count
-                        logger.info("[TOXIC] %s→%s phase=%s fd=%+.0f",
-                                    sim_a.name, sim_b.name, next_phase, phase_delta)
+                        logger.info(
+                            "[TOXIC] %s→%s phase=%s fd=%+.0f",
+                            sim_a.name,
+                            sim_b.name,
+                            next_phase,
+                            phase_delta,
+                        )
                         # Fear acquisition for target during devaluation
-                        if next_phase == "devaluation" and "[MANIPULATION" in item.interaction:
+                        if (
+                            next_phase == "devaluation"
+                            and "[MANIPULATION" in item.interaction
+                        ):
                             from datasets.manipulation import TECHNIQUE_FEAR
                             from sim_types.sim_types import Fear
+
                             tech = "gaslighting"
-                            fear_label = TECHNIQUE_FEAR.get(tech, "fear of losing grip on reality")
-                            new_fear = Fear(fear_label, sim_b.ocean.get("neuroticism", 0.5))
+                            fear_label = TECHNIQUE_FEAR.get(
+                                tech, "fear of losing grip on reality"
+                            )
+                            new_fear = Fear(
+                                fear_label, sim_b.ocean.get("neuroticism", 0.5)
+                            )
                             if new_fear.label not in [f.label for f in sim_b.fears]:
                                 sim_b.fears.append(new_fear)
         except Exception:
@@ -505,20 +596,34 @@ class SimEngine:
                     self._tick_count,
                     sim_a.sim_id,
                     "interaction",
-                    {"with": sim_b.sim_id, "action": item.interaction, "valence": valence, "memory": memory_tag},
+                    {
+                        "with": sim_b.sim_id,
+                        "action": item.interaction,
+                        "valence": valence,
+                        "memory": memory_tag,
+                    },
                 )
             except Exception as exc:
                 logger.warning("Failed to log interaction event: %s", exc)
 
         logger.info(
             "[Tick %d] RESOLVED [%s]: %s → %s (%s) fd=%+.1f rd=%+.1f valence=%.2f",
-            self._tick_count, item.interaction_id,
-            sim_a.name, sim_b.name, item.interaction, fd, rd, valence,
+            self._tick_count,
+            item.interaction_id,
+            sim_a.name,
+            sim_b.name,
+            item.interaction,
+            fd,
+            rd,
+            valence,
         )
         self._bus.emit(
             "interaction_resolved",
-            sim_a=sim_a, sim_b=sim_b, result=result,
-            valence=valence, tick=self._tick_count,
+            sim_a=sim_a,
+            sim_b=sim_b,
+            result=result,
+            valence=valence,
+            tick=self._tick_count,
             interaction_id=item.interaction_id,
             interaction=item.interaction,
         )
@@ -531,19 +636,26 @@ class SimEngine:
         zodiac = p.get("zodiac", "")
         zodiac_desc = p.get("zodiac_descriptor", "")
         from datasets.social_orientation import ORIENTATION_DESCRIPTORS
-        mbti_line   = f"MBTI: {mbti} ({mbti_desc})\n" if mbti else ""
+
+        mbti_line = f"MBTI: {mbti} ({mbti_desc})\n" if mbti else ""
         zodiac_line = f"Zodiac: {zodiac} — {zodiac_desc}\n" if zodiac else ""
         orientation = getattr(sim, "social_orientation", "Warm-Agreeable")
-        ori_desc    = ORIENTATION_DESCRIPTORS.get(orientation, "")
-        rep_score   = getattr(sim, "reputation_score", 0.0)
-        ei_rep      = getattr(sim, "ei_reputation", 0.0)
-        rep_note    = ""
+        ori_desc = ORIENTATION_DESCRIPTORS.get(orientation, "")
+        rep_score = getattr(sim, "reputation_score", 0.0)
+        ei_rep = getattr(sim, "ei_reputation", 0.0)
+        rep_note = ""
         if rep_score <= -30:
             rep_note = f"Community reputation: POOR ({rep_score:.0f}) — others may avoid them.\n"
         elif rep_score >= 40:
-            rep_note = f"Community reputation: STRONG ({rep_score:.0f}) — socially credible.\n"
+            rep_note = (
+                f"Community reputation: STRONG ({rep_score:.0f}) — socially credible.\n"
+            )
         creative_rep = getattr(sim, "creative_reputation", 0.0)
-        creative_note = f"Creative reputation: {creative_rep:.0f}/100\n" if creative_rep > 10 else ""
+        creative_note = (
+            f"Creative reputation: {creative_rep:.0f}/100\n"
+            if creative_rep > 10
+            else ""
+        )
         cultural_bg = p.get("cultural_background", "")
         return (
             f"Name: {sim.name} | Age: {p['age']} | Gender: {p['gender']}\n"
@@ -557,7 +669,9 @@ class SimEngine:
             f"N={sim.ocean['neuroticism']}\n"
             f"{mbti_line}"
             f"{zodiac_line}"
-            f"Cultural background: {cultural_bg}\n" if cultural_bg else ""
+            f"Cultural background: {cultural_bg}\n"
+            if cultural_bg
+            else ""
             f"Social orientation: {orientation} — {ori_desc}\n"
             f"EI reputation: {ei_rep:.0f}  |  "
             f"Humor: {p['humor_type']} | Comm style: {p['comm_style']}\n"
@@ -581,7 +695,11 @@ class SimEngine:
         context_str: str,
     ) -> str:
         hour = (GAME_START_HOUR + self._tick_count) % 24
-        ambient = f"\nAmbient sound: {venue['ambient_sound']}" if venue.get("ambient_sound") else ""
+        ambient = (
+            f"\nAmbient sound: {venue['ambient_sound']}"
+            if venue.get("ambient_sound")
+            else ""
+        )
 
         # Gap 5: Cultural context for cross-cultural pairs
         cultural_note = ""
@@ -590,6 +708,7 @@ class SimEngine:
             bg_b = sim_b.profile.get("cultural_background", "")
             if bg_a and bg_b and bg_a != bg_b:
                 from datasets.culture import get_cultural_context
+
                 cultural_note = get_cultural_context(bg_a, bg_b, rel.state_label())
         except Exception:
             pass
@@ -598,6 +717,7 @@ class SimEngine:
         if "office" in venue.get("name", "").lower():
             try:
                 from datasets.culture import get_workplace_norm
+
                 wn = get_workplace_norm()
                 if wn:
                     cultural_note = (cultural_note + f"\nWorkplace norm: {wn}").strip()
@@ -605,7 +725,9 @@ class SimEngine:
                 pass
 
         full_context = "\n".join(filter(None, [context_str, cultural_note]))
-        extra_ctx = f"\n=== CONTEXTUAL KNOWLEDGE ===\n{full_context}" if full_context else ""
+        extra_ctx = (
+            f"\n=== CONTEXTUAL KNOWLEDGE ===\n{full_context}" if full_context else ""
+        )
         return (
             f"/no_think\n\n"
             f"=== SIM A ===\n{self._profile_block(sim_a)}\n\n"
@@ -623,7 +745,7 @@ class SimEngine:
             f"Time of day: {hour:02d}:00{ambient}\n"
             f"{extra_ctx}\n"
             f"=== INTERACTION ===\n"
-            f"{sim_a.name} initiated: \"{interaction}\"\n\n"
+            f'{sim_a.name} initiated: "{interaction}"\n\n'
             f"Adjudicate this interaction and return the JSON result."
         )
 
@@ -637,9 +759,15 @@ class SimEngine:
             if not result:
                 return
             sim.career_performance = max(
-                0, min(100, sim.career_performance + float(result.get("performance_delta", 0)))
+                0,
+                min(
+                    100,
+                    sim.career_performance + float(result.get("performance_delta", 0)),
+                ),
             )
-            sim.simoleons = max(0, sim.simoleons + float(result.get("simoleon_delta", 0)))
+            sim.simoleons = max(
+                0, sim.simoleons + float(result.get("simoleon_delta", 0))
+            )
             sim.emotion.add(
                 result.get("emotion", "surprise"),
                 float(result.get("intensity", 0.6)),
@@ -653,13 +781,16 @@ class SimEngine:
                 float(result.get("performance_delta", 0)),
                 float(result.get("simoleon_delta", 0)),
             )
-            self._bus.emit("career_event", sim=sim, result=result, tick=self._tick_count)
+            self._bus.emit(
+                "career_event", sim=sim, result=result, tick=self._tick_count
+            )
         except Exception as exc:
             logger.warning("Career event failed for %s: %s", sim.name, exc)
 
     def _check_life_events(self) -> None:
         """Check for milestone-based life events; fall back to a random event."""
         from config import REL_CLOSE, REL_BEST
+
         fired = False
         for (id_a, id_b), rec in self.relationships.all_pairs():
             sim_a = self._sim_lookup.get(id_a)
@@ -687,7 +818,8 @@ class SimEngine:
             # Romance milestone: dating → partners
             if 55 <= rec.romance < 65 and not fired:
                 self._run_life_event(
-                    sim_a, sim_b,
+                    sim_a,
+                    sim_b,
                     event_type="relationship_milestone",
                     context=f"{sim_a.name} and {sim_b.name} have been dating.",
                 )
@@ -695,9 +827,14 @@ class SimEngine:
                 break
 
             # Friendship milestone: close → best friends
-            if REL_CLOSE <= rec.friendship < REL_BEST and random.random() < 0.4 and not fired:
+            if (
+                REL_CLOSE <= rec.friendship < REL_BEST
+                and random.random() < 0.4
+                and not fired
+            ):
                 self._run_life_event(
-                    sim_a, sim_b,
+                    sim_a,
+                    sim_b,
                     event_type="friendship_milestone",
                     context=f"{sim_a.name} and {sim_b.name} are very close friends.",
                 )
@@ -706,16 +843,25 @@ class SimEngine:
 
         if not fired:
             # 20% chance: EI scenario life event instead of generic random
-            if (self._datasets and hasattr(self._datasets, "ei_scenarios")
-                    and self._datasets.ei_scenarios and random.random() < 0.20):
-                from datasets.emotional_intelligence import sample_ei_scenario, format_ei_interaction
+            if (
+                self._datasets
+                and hasattr(self._datasets, "ei_scenarios")
+                and self._datasets.ei_scenarios
+                and random.random() < 0.20
+            ):
+                from datasets.emotional_intelligence import (
+                    sample_ei_scenario,
+                    format_ei_interaction,
+                )
+
                 ei = sample_ei_scenario()
                 if ei:
                     sim_a = random.choice(self.sims)
                     others = [s for s in self.sims if s is not sim_a]
                     sim_b = random.choice(others) if others else None
                     self._run_life_event(
-                        sim_a, sim_b,
+                        sim_a,
+                        sim_b,
                         event_type="ei_scenario",
                         context=format_ei_interaction(ei),
                     )
@@ -733,7 +879,9 @@ class SimEngine:
         from core.sim import Sim as SimClass
 
         okcupid_essays = self._datasets.okcupid_essays if self._datasets else None
-        profile = generate_child_profile(parent_a.profile, parent_b.profile, okcupid_essays)
+        profile = generate_child_profile(
+            parent_a.profile, parent_b.profile, okcupid_essays
+        )
         child = SimClass(profile)
         child.simoleons = random.uniform(200, 800)
         child.lod_tier = LODTier.ACTIVE
@@ -751,7 +899,10 @@ class SimEngine:
 
         logger.info(
             "[Child] %s born to %s & %s (id=%s)",
-            child.name, parent_a.name, parent_b.name, child.sim_id,
+            child.name,
+            parent_a.name,
+            parent_b.name,
+            child.sim_id,
         )
         self._bus.emit(
             "child_born",
@@ -762,12 +913,26 @@ class SimEngine:
         )
         return child
 
-    def _run_life_event(self, sim_a: Sim, sim_b: Sim | None, event_type: str | None = None, context: str | None = None) -> None:
+    def _run_life_event(
+        self,
+        sim_a: Sim,
+        sim_b: Sim | None,
+        event_type: str | None = None,
+        context: str | None = None,
+    ) -> None:
         if event_type is None:
             # Expanded life event pool
-            pool = ["milestone", "conflict", "celebration", "loss", "opportunity",
-                    "financial_crisis", "rivalry_escalation", "creative_breakthrough",
-                    "cultural_clash"]
+            pool = [
+                "milestone",
+                "conflict",
+                "celebration",
+                "loss",
+                "opportunity",
+                "financial_crisis",
+                "rivalry_escalation",
+                "creative_breakthrough",
+                "cultural_clash",
+            ]
             # Weight financial_crisis when sim is stressed
             if sim_a.simoleons < 300:
                 pool.extend(["financial_crisis"] * 2)
@@ -776,12 +941,19 @@ class SimEngine:
                 rel = self.relationships.get(sim_a.sim_id, sim_b.sim_id)
                 if rel.state_label() == "rivals":
                     pool.extend(["rivalry_escalation"] * 2)
+                if rel.romance >= 80 and rel.romance_label() == "partners":
+                    pool.extend(["breakup", "reconciliation_arc"])
+                    if self._datasets and getattr(
+                        self._datasets, "literotica_snippets", []
+                    ):
+                        pool.append("intimate_encounter")
             event_type = random.choice(pool)
 
         # Health scare: use symptom context
         if event_type == "health_scare" and context is None:
             try:
                 from datasets.health import health_scare_context
+
                 context = health_scare_context(sim_a)
             except Exception:
                 pass
@@ -790,16 +962,73 @@ class SimEngine:
         if event_type == "financial_crisis" and context is None:
             try:
                 from datasets.finance import financial_crisis_context
-                context = financial_crisis_context(sim_a.simoleons, sim_a.profile["job"])
+
+                context = financial_crisis_context(
+                    sim_a.simoleons, sim_a.profile["job"]
+                )
             except Exception:
                 pass
         if context is None:
             context = f"tick={self._tick_count}, emotion={sim_a.emotion.dominant}"
+
+        # BORU arc scaffolding for high-drama pair events
+        if (
+            sim_b
+            and self._datasets
+            and getattr(self._datasets, "boru_arcs", [])
+            and event_type in {"rivalry_escalation", "breakup", "reconciliation_arc"}
+        ):
+            key = (min(sim_a.sim_id, sim_b.sim_id), max(sim_a.sim_id, sim_b.sim_id))
+            arc_state = self._relationship_story_arcs.get(key)
+            if not arc_state:
+                from datasets.boru import sample_arc
+
+                arc = sample_arc()
+                if arc:
+                    arc_state = {"arc": arc, "stage": 0}
+                    self._relationship_story_arcs[key] = arc_state
+            if arc_state:
+                arc = arc_state["arc"]
+                stage = int(arc_state.get("stage", 0))
+                beat = "inciting"
+                if stage == 1:
+                    beat = "escalation"
+                elif stage >= 2:
+                    beat = "resolution"
+                context += (
+                    f"\nStory arc scaffold ({beat}): {arc.get(beat, '')}\n"
+                    "Use this only as structure: inciting event -> escalation -> resolution."
+                )
+                arc_state["stage"] = min(stage + 1, 2)
+
+        # Adult-gated intimate encounter context
+        if (
+            event_type == "intimate_encounter"
+            and sim_b
+            and self._datasets
+            and getattr(self._datasets, "literotica_snippets", [])
+        ):
+            rel = self.relationships.get(sim_a.sim_id, sim_b.sim_id)
+            if rel.romance < 75 or rel.romance_label() != "partners":
+                return
+            from datasets.adult import sample_literotica_snippet
+
+            snippet = sample_literotica_snippet()
+            if snippet:
+                context += (
+                    "\nIntimate encounter seed (adult mode): "
+                    f"{snippet[:350]}\n"
+                    "Narrate scene tastefully; keep adjudication outcomes strictly JSON deltas."
+                )
+
         try:
             result = run_life_event_llm(
                 self._llm,
                 "You are narrating a life event in an AI life simulation.",
-                sim_a, sim_b, event_type, context,
+                sim_a,
+                sim_b,
+                event_type,
+                context,
             )
             if not result:
                 return
@@ -825,23 +1054,30 @@ class SimEngine:
             narrative = result.get("narrative", "")
             try:
                 from llm.context import get_life_event_context
+
                 cascade_text = get_life_event_context(event_type, narrative)
                 if cascade_text:
                     from datasets.event2mind import emotional_cascade
+
                     cascade = emotional_cascade(f"{event_type} {narrative}")
                     # Apply secondary wants as fresh moodlets
                     for reaction in cascade.get("xReact", [])[:1]:
                         from config import EMOTIONS_27
+
                         if reaction.lower() in EMOTIONS_27:
-                            sim_a.emotion.add(reaction.lower(), 0.5, 4, source="cascade")
+                            sim_a.emotion.add(
+                                reaction.lower(), 0.5, 4, source="cascade"
+                            )
             except Exception:
                 pass
 
-            logger.info(
-                "[Life Event] %s: %s", event_type, narrative[:80]
-            )
+            logger.info("[Life Event] %s: %s", event_type, narrative[:80])
             self._bus.emit(
-                "life_event", sim_a=sim_a, sim_b=sim_b, result=result, tick=self._tick_count
+                "life_event",
+                sim_a=sim_a,
+                sim_b=sim_b,
+                result=result,
+                tick=self._tick_count,
             )
         except Exception as exc:
             logger.warning("Life event failed: %s", exc)
@@ -853,15 +1089,21 @@ class SimEngine:
         crowd = self._venue.get("crowd", 0)
         if crowd < 0.7:
             return
-        if random.random() > 0.25:   # 25% chance per eligible tick
+        if random.random() > 0.25:  # 25% chance per eligible tick
             return
-        if not (self._datasets and hasattr(self._datasets, "group_scenes")
-                and self._datasets.group_scenes):
+        if not (
+            self._datasets
+            and hasattr(self._datasets, "group_scenes")
+            and self._datasets.group_scenes
+        ):
             return
         try:
             from datasets.group_scenes import (
-                sample_group_scene, sample_trigger, format_group_interaction,
+                sample_group_scene,
+                sample_trigger,
+                format_group_interaction,
             )
+
             scene = sample_group_scene()
             trigger = sample_trigger()
             if not scene:
@@ -872,8 +1114,12 @@ class SimEngine:
             initiator = participants[0]
             target = participants[1]
             self._submit_interaction(initiator, target, interaction, self._venue)
-            logger.info("[GROUP] %s + %d witnesses at %s",
-                        initiator.name, len(participants) - 1, self._venue["name"])
+            logger.info(
+                "[GROUP] %s + %d witnesses at %s",
+                initiator.name,
+                len(participants) - 1,
+                self._venue["name"],
+            )
         except Exception as exc:
             logger.debug("Group event failed: %s", exc)
 

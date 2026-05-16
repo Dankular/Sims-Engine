@@ -11,33 +11,34 @@ Valence outcomes:
   - Successfully received (high agreeableness target, good timing): highest-weight memory
   - Rejected (low agreeableness, bad timing): trauma-level negative memory
 """
+
 from __future__ import annotations
 
 import random
 from datasets.cache import cache_load, cache_save
 
 _CACHE_KEY = "confessions_index"
-_HF_ID     = "SocialGrep/one-million-reddit-confessions"
-_MAX_LOAD  = 4000
+_HF_ID = "SocialGrep/one-million-reddit-confessions"
+_MAX_LOAD = 4000
 
 # Emotion/fear → confession theme keywords
 EMOTION_KEYWORDS: dict[str, list[str]] = {
-    "remorse":        ["regret", "mistake", "wrong", "sorry", "guilty"],
-    "guilt":          ["guilty", "ashamed", "confession", "did something"],
-    "grief":          ["lost", "death", "passed", "miss"],
-    "fear":           ["afraid", "scared", "anxiety", "terrified"],
-    "sadness":        ["lonely", "alone", "sad", "depressed", "isolated"],
-    "embarrassment":  ["embarrassing", "humiliating", "awkward", "cringe"],
-    "pride":          ["proud", "achievement", "finally", "accomplished"],
-    "love":           ["love", "feelings", "crush", "romantic"],
-    "nervousness":    ["nervous", "anxious", "worry", "stress"],
+    "remorse": ["regret", "mistake", "wrong", "sorry", "guilty"],
+    "guilt": ["guilty", "ashamed", "confession", "did something"],
+    "grief": ["lost", "death", "passed", "miss"],
+    "fear": ["afraid", "scared", "anxiety", "terrified"],
+    "sadness": ["lonely", "alone", "sad", "depressed", "isolated"],
+    "embarrassment": ["embarrassing", "humiliating", "awkward", "cringe"],
+    "pride": ["proud", "achievement", "finally", "accomplished"],
+    "love": ["love", "feelings", "crush", "romantic"],
+    "nervousness": ["nervous", "anxious", "worry", "stress"],
 }
 
 FEAR_KEYWORDS: dict[str, list[str]] = {
-    "fear of abandonment":   ["alone", "left", "abandoned", "nobody"],
-    "fear of rejection":     ["rejected", "turned down", "not enough"],
-    "fear of humiliation":   ["humiliated", "embarrassed", "laughed at"],
-    "fear of commitment":    ["commitment", "relationship", "settle down"],
+    "fear of abandonment": ["alone", "left", "abandoned", "nobody"],
+    "fear of rejection": ["rejected", "turned down", "not enough"],
+    "fear of humiliation": ["humiliated", "embarrassed", "laughed at"],
+    "fear of commitment": ["commitment", "relationship", "settle down"],
 }
 
 
@@ -50,12 +51,15 @@ def load_confessions() -> dict[str, list[str]]:
     index: dict[str, list[str]] = {}
     try:
         from datasets import load_dataset
+
         ds = load_dataset(_HF_ID, split="train", streaming=True, trust_remote_code=True)
         count = 0
         for row in ds:
             if count >= _MAX_LOAD:
                 break
-            text = (row.get("selftext") or row.get("text") or row.get("body") or "").strip()
+            text = (
+                row.get("selftext") or row.get("text") or row.get("body") or ""
+            ).strip()
             if not text or len(text) < 40 or len(text) > 800:
                 continue
             text_lower = text.lower()
@@ -85,7 +89,7 @@ def sample_confession(
     Requires friendship > 65 for personal confessions.
     """
     if friendship_score < 35:
-        return None   # too early to confess anything serious
+        return None  # too early to confess anything serious
 
     index = load_confessions()
     if not index:
@@ -109,10 +113,15 @@ def sample_confession(
 
 
 def format_confession_interaction(confession: str, friendship: float) -> str:
-    depth = "vulnerable, deeply personal" if friendship >= 65 else "cautious, testing the waters"
+    if friendship >= 65:
+        depth = "deep vulnerability"
+    elif friendship >= 45:
+        depth = "mid-level feelings"
+    else:
+        depth = "surface-level personal"
     return (
         f"[CONFESSION — {depth}]\n"
-        f"Sim A shares: \"{confession[:300]}\"\n"
+        f'Sim A shares: "{confession[:300]}"\n'
         f"Adjudicate Sim B's reaction based on their personality. "
         f"Accepted confessions create very high-valence memories; "
         f"rejected ones create trauma-level negative memories."

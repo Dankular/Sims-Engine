@@ -30,8 +30,16 @@ def get_interaction_context(
         parts.append(f"SOCIAL_IQA: {iqa}")
 
     # Social bias — escalate if interaction touches sensitive territory
-    if datasets and hasattr(datasets, "social_bias_norms") and datasets.social_bias_norms:
-        from datasets.social_bias import is_potentially_offensive, sample_conflict_escalation_context
+    if (
+        datasets
+        and hasattr(datasets, "social_bias_norms")
+        and datasets.social_bias_norms
+    ):
+        from datasets.social_bias import (
+            is_potentially_offensive,
+            sample_conflict_escalation_context,
+        )
+
         if is_potentially_offensive(interaction):
             ctx = sample_conflict_escalation_context()
             if ctx:
@@ -50,6 +58,7 @@ def get_interaction_context(
     # Persona consistency examples for sim_a
     if datasets and hasattr(datasets, "persona_chat") and datasets.persona_chat:
         from datasets.persona_chat import get_persona_examples
+
         examples = get_persona_examples(sim_a.ocean, n=2)
         if examples:
             parts.append("PERSONA EXAMPLES for Sim A's voice:\n" + "\n".join(examples))
@@ -60,6 +69,7 @@ def get_interaction_context(
 def build_adjudicator_system(
     norms: list[str],
     datasets: "DatasetRegistry | None" = None,
+    interaction: str = "",
 ) -> str:
     prompt = ADJUDICATOR_SYSTEM_BASE
 
@@ -71,9 +81,21 @@ def build_adjudicator_system(
     # Ethics calibration from hendrycks/ethics
     if datasets and hasattr(datasets, "ethics_norms") and datasets.ethics_norms:
         from datasets.ethics import get_ethics_calibration
+
         ethics_block = get_ethics_calibration(n_commonsense=2, n_virtue=2)
         if ethics_block:
             prompt += ethics_block
+
+    if (
+        datasets
+        and hasattr(datasets, "prosocial_nsfw_norms")
+        and datasets.prosocial_nsfw_norms
+        and any(
+            tag in interaction.upper() for tag in ["[INTIMATE", "INTIMATE_ENCOUNTER"]
+        )
+    ):
+        sample = datasets.prosocial_nsfw_norms[:4]
+        prompt += "\n\nADULT CONTEXT NORMS:\n" + "\n".join(f"- {n}" for n in sample)
 
     return prompt
 
@@ -82,6 +104,7 @@ def get_life_event_context(event_type: str, narrative: str) -> str:
     """Query event2Mind for emotional cascades after a life event fires."""
     try:
         from datasets.event2mind import emotional_cascade
+
         cascade = emotional_cascade(f"{event_type} {narrative}")
         parts: list[str] = []
         if cascade.get("xReact"):
