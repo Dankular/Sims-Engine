@@ -136,10 +136,35 @@ def get_ekman():
     return None if _EKMAN is _SENTINEL else _EKMAN
 
 
+class _TransformersCrossEncoder:
+    """
+    Thin wrapper around AutoModelForSequenceClassification for cross-encoder
+    scoring.  Uses pure transformers — avoids the sentence_transformers /
+    local-datasets namespace collision on this project.
+    """
+    def __init__(self, model, tokenizer):
+        self._model = model
+        self._tok   = tokenizer
+
+    def predict(self, pairs: list[tuple[str, str]], show_progress_bar: bool = False) -> list[float]:
+        import torch
+        queries   = [p[0] for p in pairs]
+        passages  = [p[1] for p in pairs]
+        enc = self._tok(
+            queries, passages,
+            padding=True, truncation=True,
+            max_length=512, return_tensors="pt",
+        )
+        with torch.no_grad():
+            logits = self._model(**enc).logits.squeeze(-1)
+        scores = logits.tolist()
+        return scores if isinstance(scores, list) else [scores]
+
+
 def get_cross_encoder():
     """
     CrossEncoder for memory reranking (cross-encoder/ms-marco-MiniLM-L-6-v2).
-    Returns a CrossEncoder object with .predict(pairs) method.
+    Uses transformers directly to avoid the local datasets/ namespace clash.
     """
     global _CROSS_ENCODER
     if _CROSS_ENCODER is not None:
@@ -147,12 +172,23 @@ def get_cross_encoder():
     with _lock:
         if _CROSS_ENCODER is None:
             try:
-                from sentence_transformers import CrossEncoder
+                from transformers import (
+                    AutoTokenizer,
+                    AutoModelForSequenceClassification,
+                )
                 from config import CROSS_ENCODER_MODEL
                 with _hf_online():
                     for local in (True, False):
                         try:
-                            _CROSS_ENCODER = CrossEncoder(CROSS_ENCODER_MODEL, local_files_only=local)
+                            tok = AutoTokenizer.from_pretrained(
+                                CROSS_ENCODER_MODEL, local_files_only=local
+                            )
+                            mdl = AutoModelForSequenceClassification.from_pretrained(
+                                CROSS_ENCODER_MODEL, local_files_only=local
+                            )
+                            mdl.eval()
+                            _CROSS_ENCODER = _TransformersCrossEncoder(mdl, tok)
+                            logger.info("[SmallModel] CrossEncoder loaded: %s", CROSS_ENCODER_MODEL)
                             break
                         except Exception:
                             if local:
@@ -167,7 +203,9 @@ def get_cross_encoder():
 
 def get_comet() -> tuple[Any, Any] | None:
     """
-    COMET causal inference (allenai/comet-distil).
+    ATOMIC causal inference via google/flan-t5-small.
+    flan-t5-small is instruction-tuned and handles ATOMIC-style prompts
+    (xReact / xWant / oReact) without a task-specific fine-tune.
     Returns (model, tokenizer) tuple or None.
     """
     global _COMET
@@ -176,15 +214,20 @@ def get_comet() -> tuple[Any, Any] | None:
     with _lock:
         if _COMET is None:
             try:
-                from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+                from transformers import T5ForConditionalGeneration, T5Tokenizer
                 from config import COMET_MODEL
                 with _hf_online():
                     for local in (True, False):
                         try:
-                            tok = AutoTokenizer.from_pretrained(COMET_MODEL, local_files_only=local)
-                            mdl = AutoModelForSeq2SeqLM.from_pretrained(COMET_MODEL, local_files_only=local)
+                            tok = T5Tokenizer.from_pretrained(
+                                COMET_MODEL, local_files_only=local, legacy=False
+                            )
+                            mdl = T5ForConditionalGeneration.from_pretrained(
+                                COMET_MODEL, local_files_only=local
+                            )
+                            mdl.eval()
                             _COMET = (mdl, tok)
-                            logger.info("[SmallModel] COMET loaded: %s", COMET_MODEL)
+                            logger.info("[SmallModel] COMET(flan-t5-small) loaded")
                             break
                         except Exception:
                             if local:
@@ -192,7 +235,7 @@ def get_comet() -> tuple[Any, Any] | None:
                 if _COMET is None:
                     _COMET = _SENTINEL
             except Exception as exc:
-                logger.debug("comet load failed: %s", exc)
+                logger.debug("comet(flan-t5) load failed: %s", exc)
                 _COMET = _SENTINEL
     return None if _COMET is _SENTINEL else _COMET
 
@@ -234,9 +277,17 @@ def sentiment_to_modifier(pipeline_result: list[dict]) -> float:
     return 1.0                          # neutral
 
 
+# flan-t5 instruction prompts for each ATOMIC relation
+_COMET_PROMPTS: dict[str, str] = {
+    "xReact": "Answer in a few words: If someone {event}, how do they feel emotionally?",
+    "xWant":  "Answer in a few words: If someone {event}, what would they want to do next?",
+    "oReact": "Answer in a few words: If someone {event}, how would nearby people react?",
+}
+
+
 def comet_infer(event_text: str, relations: list[str] | None = None) -> dict[str, str]:
     """
-    Run COMET inference for the given event text and relation types.
+    Run ATOMIC causal inference via flan-t5-small.
     Returns {relation: completion} or {} on failure.
     """
     pair = get_comet()
@@ -247,14 +298,19 @@ def comet_infer(event_text: str, relations: list[str] | None = None) -> dict[str
         relations = ["xReact", "xWant", "oReact"]
     results: dict[str, str] = {}
     for rel in relations:
+        prompt_template = _COMET_PROMPTS.get(rel)
+        if not prompt_template:
+            continue
         try:
             import torch
-            inp = f"{event_text} [sep] {rel}"
-            enc = tokenizer(inp, return_tensors="pt", truncation=True, max_length=64)
+            prompt = prompt_template.format(event=event_text[:120])
+            enc = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=128)
             with torch.no_grad():
-                out = model.generate(**enc, max_new_tokens=24, num_beams=2)
+                out = model.generate(
+                    **enc, max_new_tokens=20, num_beams=2, early_stopping=True
+                )
             text = tokenizer.decode(out[0], skip_special_tokens=True).strip()
-            if text and text.lower() not in ("none", ""):
+            if text and text.lower() not in ("none", "i don't know", ""):
                 results[rel] = text
         except Exception:
             pass

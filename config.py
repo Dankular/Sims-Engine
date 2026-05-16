@@ -18,7 +18,7 @@ GOAL_NLI_MODEL       = "typeform/distilbert-base-uncased-mnli"    # 67 MB  — g
 SENTIMENT_MODEL      = "cardiffnlp/twitter-roberta-base-sentiment-latest"  # 125 MB — delta modulation
 EKMAN_MODEL          = "j-hartmann/emotion-english-distilroberta-base"     # 83 MB  — emotional cascade
 CROSS_ENCODER_MODEL  = "cross-encoder/ms-marco-MiniLM-L-6-v2"    # 85 MB  — memory reranking
-COMET_MODEL          = "allenai/comet-distil"                      # 250 MB — ATOMIC causal inference
+COMET_MODEL          = "google/flan-t5-small"                      # 300 MB — ATOMIC causal inference via instruction prompts
 REWARD_MODEL         = "OpenAssistant/reward-model-deberta-v3-large-v2"   # 400 MB — conformity pressure
 
 # Memory embeddings — static-retrieval-mrl is 100-400× faster on CPU
