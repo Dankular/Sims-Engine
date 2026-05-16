@@ -76,7 +76,9 @@ def generate_sim_profile(
 
     from identity.mbti import get_mbti, mbti_descriptor
     from identity.zodiac import enrich_profile_with_zodiac
+    from datasets.culture import sample_cultural_background
     mbti = get_mbti(ocean, self_summary)
+    cultural_background = sample_cultural_background()
 
     profile = {
         "id": sim_id,
@@ -104,6 +106,7 @@ def generate_sim_profile(
         "self_summary": self_summary,
         "mbti": mbti,
         "mbti_descriptor": mbti_descriptor(mbti),
+        "cultural_background": cultural_background,
         "parent_ids": list(parent_ids) if parent_ids else [],
     }
     return enrich_profile_with_zodiac(profile)
@@ -206,7 +209,13 @@ def generate_child_profile(
 
     from identity.mbti import get_mbti, mbti_descriptor
     from identity.zodiac import enrich_profile_with_zodiac
+    from datasets.culture import sample_cultural_background
     mbti = get_mbti(ocean, self_summary)
+    # Child inherits one parent's cultural background
+    cultural_background = rng.choice([
+        parent_a.get("cultural_background", ""),
+        parent_b.get("cultural_background", ""),
+    ]) or sample_cultural_background()
 
     profile = {
         "id": sim_id,
@@ -232,6 +241,7 @@ def generate_child_profile(
         "self_summary": self_summary,
         "mbti": mbti,
         "mbti_descriptor": mbti_descriptor(mbti),
+        "cultural_background": cultural_background,
         "parent_ids": parent_ids,
     }
     return enrich_profile_with_zodiac(profile)

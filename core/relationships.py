@@ -15,6 +15,10 @@ class RelationshipRecord:
     romance: float = 0.0
     interactions: int = 0
     memories: list[dict] = field(default_factory=list)
+    # Toxic cycle tracking (Gap 4)
+    in_toxic_cycle: bool = False
+    toxic_cycle_phase: str = "none"   # "love_bombing" | "devaluation" | "repair" | "none"
+    toxic_cycle_tick: int = 0         # tick when current phase started
 
     def state_label(self) -> str:
         if self.friendship >= REL_BEST:
@@ -25,8 +29,10 @@ class RelationshipRecord:
             return "friends"
         if self.friendship >= REL_ACQUAINTANCE:
             return "acquaintances"
-        if self.friendship <= -REL_FRIEND:
+        if self.friendship <= -REL_CLOSE:
             return "enemies"
+        if self.friendship <= -REL_FRIEND:
+            return "rivals"      # new tier between dislike and enemies
         if self.friendship <= -REL_ACQUAINTANCE:
             return "dislike"
         return "strangers"

@@ -436,6 +436,51 @@ class SimEngine:
             except Exception:
                 pass
 
+        # Gap 3: Creative reputation update
+        if "[CREATIVE WORK" in item.interaction:
+            try:
+                from datasets.creative_works import creative_reputation_delta
+                delta = creative_reputation_delta(
+                    valence,
+                    sim_b.ocean.get("openness", 0.5),
+                    sim_a.skills.levels.get("creativity", 0),
+                )
+                sim_a.creative_reputation = max(0, min(100, sim_a.creative_reputation + delta))
+            except Exception:
+                pass
+
+        # Gap 4: Toxic cycle detection and phase tracking
+        try:
+            from datasets.manipulation import (
+                is_toxic_initiator, is_toxic_target,
+                next_toxic_phase, CYCLE_PHASES,
+            )
+            if is_toxic_initiator(sim_a) and is_toxic_target(sim_b):
+                if 40 <= rel.friendship <= 70:
+                    if not rel.in_toxic_cycle:
+                        rel.in_toxic_cycle = True
+                        rel.toxic_cycle_phase = "love_bombing"
+                        rel.toxic_cycle_tick = self._tick_count
+                    elif (self._tick_count - rel.toxic_cycle_tick) >= 3:
+                        next_phase = next_toxic_phase(rel.toxic_cycle_phase)
+                        phase_delta = CYCLE_PHASES.get(next_phase, 0)
+                        rel.apply_deltas(phase_delta, 0)
+                        rel.toxic_cycle_phase = next_phase
+                        rel.toxic_cycle_tick = self._tick_count
+                        logger.info("[TOXIC] %s→%s phase=%s fd=%+.0f",
+                                    sim_a.name, sim_b.name, next_phase, phase_delta)
+                        # Fear acquisition for target during devaluation
+                        if next_phase == "devaluation" and "[MANIPULATION" in item.interaction:
+                            from datasets.manipulation import TECHNIQUE_FEAR
+                            from sim_types.sim_types import Fear
+                            tech = "gaslighting"
+                            fear_label = TECHNIQUE_FEAR.get(tech, "fear of losing grip on reality")
+                            new_fear = Fear(fear_label, sim_b.ocean.get("neuroticism", 0.5))
+                            if new_fear.label not in [f.label for f in sim_b.fears]:
+                                sim_b.fears.append(new_fear)
+        except Exception:
+            pass
+
         sim_a.register_action(item.interaction, self._tick_count)
 
         if self._db:
@@ -481,6 +526,9 @@ class SimEngine:
             rep_note = f"Community reputation: POOR ({rep_score:.0f}) — others may avoid them.\n"
         elif rep_score >= 40:
             rep_note = f"Community reputation: STRONG ({rep_score:.0f}) — socially credible.\n"
+        creative_rep = getattr(sim, "creative_reputation", 0.0)
+        creative_note = f"Creative reputation: {creative_rep:.0f}/100\n" if creative_rep > 10 else ""
+        cultural_bg = p.get("cultural_background", "")
         return (
             f"Name: {sim.name} | Age: {p['age']} | Gender: {p['gender']}\n"
             f"Job: {p['job']} | Diet: {p['diet']}\n"
@@ -493,11 +541,13 @@ class SimEngine:
             f"N={sim.ocean['neuroticism']}\n"
             f"{mbti_line}"
             f"{zodiac_line}"
+            f"Cultural background: {cultural_bg}\n" if cultural_bg else ""
             f"Social orientation: {orientation} — {ori_desc}\n"
             f"EI reputation: {ei_rep:.0f}  |  "
             f"Humor: {p['humor_type']} | Comm style: {p['comm_style']}\n"
             f"Attachment: {p['attachment']}\n"
             f"{rep_note}"
+            f"{creative_note}"
             f"Charisma: {sim.skills.levels.get('charisma', 0):.1f}/10 | "
             f"Comedy: {sim.skills.levels.get('comedy', 0):.1f}/10\n"
             f"Current emotion: {sim.emotion.dominant} (valence={sim.emotion.dominant_valence})\n"
@@ -516,7 +566,30 @@ class SimEngine:
     ) -> str:
         hour = (GAME_START_HOUR + self._tick_count) % 24
         ambient = f"\nAmbient sound: {venue['ambient_sound']}" if venue.get("ambient_sound") else ""
-        extra_ctx = f"\n=== CONTEXTUAL KNOWLEDGE ===\n{context_str}" if context_str else ""
+
+        # Gap 5: Cultural context for cross-cultural pairs
+        cultural_note = ""
+        try:
+            bg_a = sim_a.profile.get("cultural_background", "")
+            bg_b = sim_b.profile.get("cultural_background", "")
+            if bg_a and bg_b and bg_a != bg_b:
+                from datasets.culture import get_cultural_context
+                cultural_note = get_cultural_context(bg_a, bg_b, rel.state_label())
+        except Exception:
+            pass
+
+        # Add workplace norms for office venue
+        if "office" in venue.get("name", "").lower():
+            try:
+                from datasets.culture import get_workplace_norm
+                wn = get_workplace_norm()
+                if wn:
+                    cultural_note = (cultural_note + f"\nWorkplace norm: {wn}").strip()
+            except Exception:
+                pass
+
+        full_context = "\n".join(filter(None, [context_str, cultural_note]))
+        extra_ctx = f"\n=== CONTEXTUAL KNOWLEDGE ===\n{full_context}" if full_context else ""
         return (
             f"/no_think\n\n"
             f"=== SIM A ===\n{self._profile_block(sim_a)}\n\n"
@@ -675,9 +748,27 @@ class SimEngine:
 
     def _run_life_event(self, sim_a: Sim, sim_b: Sim | None, event_type: str | None = None, context: str | None = None) -> None:
         if event_type is None:
-            event_type = random.choice(
-                ["milestone", "conflict", "celebration", "loss", "opportunity"]
-            )
+            # Expanded life event pool
+            pool = ["milestone", "conflict", "celebration", "loss", "opportunity",
+                    "financial_crisis", "rivalry_escalation", "creative_breakthrough",
+                    "cultural_clash"]
+            # Weight financial_crisis when sim is stressed
+            if sim_a.simoleons < 300:
+                pool.extend(["financial_crisis"] * 2)
+            # Weight rivalry_escalation when relationship is in rivals tier
+            if sim_b:
+                rel = self.relationships.get(sim_a.sim_id, sim_b.sim_id)
+                if rel.state_label() == "rivals":
+                    pool.extend(["rivalry_escalation"] * 2)
+            event_type = random.choice(pool)
+
+        # Financial crisis: use FiQA context
+        if event_type == "financial_crisis" and context is None:
+            try:
+                from datasets.finance import financial_crisis_context
+                context = financial_crisis_context(sim_a.simoleons, sim_a.profile["job"])
+            except Exception:
+                pass
         if context is None:
             context = f"tick={self._tick_count}, emotion={sim_a.emotion.dominant}"
         try:

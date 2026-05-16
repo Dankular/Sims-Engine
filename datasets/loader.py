@@ -2,6 +2,12 @@ from dataclasses import dataclass, field
 import concurrent.futures
 
 from datasets.aita import load_aita_index
+from datasets.cooking import load_cooking_dialogs
+from datasets.creative_works import load_creative_works
+from datasets.culture import load_culture_index
+from datasets.debate import load_debate_index
+from datasets.finance import load_finance_questions
+from datasets.manipulation import load_manipulation_index
 from datasets.atomic import load_atomic_index
 from datasets.confessions import load_confessions
 from datasets.convai2 import load_convai2_seeds
@@ -67,6 +73,13 @@ class DatasetRegistry:
     confessions_index:      dict        = field(default_factory=dict)
     # ── Class 7: Emotional Intelligence ──────────────────────────────────────
     ei_scenarios:           list[dict]  = field(default_factory=list)
+    # ── Coded Gaps ────────────────────────────────────────────────────────────
+    debate_index:           dict        = field(default_factory=dict)   # Gap 1: Logic
+    cooking_dialogs:        list[dict]  = field(default_factory=list)   # Gap 2: Cooking
+    creative_works:         dict        = field(default_factory=dict)   # Gap 3: Creativity
+    manipulation_index:     dict        = field(default_factory=dict)   # Gap 4: Toxic
+    culture_index:          dict        = field(default_factory=dict)   # Gap 5: Culture
+    finance_questions:      list[str]   = field(default_factory=list)   # Gap 6: Finance
 
     @classmethod
     def load(cls, workers: int = 4) -> "DatasetRegistry":
@@ -98,11 +111,19 @@ class DatasetRegistry:
             "persuasion_args":      load_persuasion,
             "confessions_index":    load_confessions,
             "ei_scenarios":         load_ei_scenarios,
+            # Coded gaps
+            "debate_index":         load_debate_index,
+            "cooking_dialogs":      load_cooking_dialogs,
+            "creative_works":       load_creative_works,
+            "manipulation_index":   load_manipulation_index,
+            "culture_index":        load_culture_index,
+            "finance_questions":    load_finance_questions,
         }
         _list_keys = {
             "okcupid_essays", "social_norms", "dialogue_actions", "convai2_seeds",
             "moral_stories", "moral_choice", "persona_chat", "social_bias_norms",
             "dadjokes", "persuasion_args", "ei_scenarios",
+            "cooking_dialogs", "finance_questions",
         }
         results: dict[str, object] = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
@@ -138,6 +159,12 @@ class DatasetRegistry:
             persuasion_args=results["persuasion_args"],
             confessions_index=results["confessions_index"],
             ei_scenarios=results["ei_scenarios"],
+            debate_index=results["debate_index"],
+            cooking_dialogs=results["cooking_dialogs"],
+            creative_works=results["creative_works"],
+            manipulation_index=results["manipulation_index"],
+            culture_index=results["culture_index"],
+            finance_questions=results["finance_questions"],
         )
 
 

@@ -56,6 +56,8 @@ class Sim:
         self.social_orientation: str = "Warm-Agreeable"
         # Emotional intelligence reputation (Class 7)
         self.ei_reputation: float = 0.0      # -50..50
+        # Creative reputation (Gap 3)
+        self.creative_reputation: float = 0.0  # 0..100
 
     @property
     def ocean(self) -> dict:

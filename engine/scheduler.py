@@ -155,6 +155,62 @@ def choose_interaction(
                     1.5 if friendship_score >= 65 else 1.1,
                 ))
 
+        # Gap 1: Debate — logic skill-gated (8% when logic >= 3)
+        logic_skill = sim_a.skills.levels.get("logic", 0)
+        if random.random() < 0.08 and logic_skill >= 3:
+            if hasattr(datasets, "debate_index") and datasets.debate_index:
+                from datasets.debate import sample_debate_argument, format_debate_interaction
+                arg = sample_debate_argument(logic_skill)
+                if arg:
+                    candidates.append((
+                        format_debate_interaction(arg, logic_skill),
+                        1.0 + logic_skill * 0.12,
+                    ))
+
+        # Gap 2: Cooking — skill-gated (8% when cooking >= 3)
+        cooking_skill = sim_a.skills.levels.get("cooking", 0)
+        if random.random() < 0.08 and cooking_skill >= 3:
+            if hasattr(datasets, "cooking_dialogs") and datasets.cooking_dialogs:
+                from datasets.cooking import sample_recipe, format_cooking_interaction
+                recipe = sample_recipe(cooking_skill)
+                if recipe:
+                    guest_diets = [sim_b.profile.get("diet", "omnivore")]
+                    candidates.append((
+                        format_cooking_interaction(recipe, cooking_skill, guest_diets),
+                        1.0 + cooking_skill * 0.08,
+                    ))
+
+        # Gap 3: Creativity — skill-gated (10% when creativity >= 2)
+        creativity_skill = sim_a.skills.levels.get("creativity", 0)
+        if random.random() < 0.10 and creativity_skill >= 2:
+            if hasattr(datasets, "creative_works") and datasets.creative_works:
+                from datasets.creative_works import sample_creative_work, format_creative_interaction
+                work = sample_creative_work(creativity_skill)
+                if work:
+                    candidates.append((
+                        format_creative_interaction(work, creativity_skill),
+                        1.0 + creativity_skill * 0.1,
+                    ))
+
+        # Gap 4: Manipulation — toxic initiator (5% when conditions met)
+        if random.random() < 0.05 and hasattr(datasets, "manipulation_index"):
+            from datasets.manipulation import is_toxic_initiator, sample_manipulation, format_manipulation_interaction
+            if is_toxic_initiator(sim_a):
+                manip = sample_manipulation()
+                if manip:
+                    candidates.append((format_manipulation_interaction(manip), 1.6))
+
+        # Gap 6: Financial stress seeds (10% when simoleons < threshold)
+        from config import LOW_FUNDS_THRESHOLD
+        if (sim_a.simoleons < LOW_FUNDS_THRESHOLD
+                and random.random() < 0.10
+                and hasattr(datasets, "finance_questions")
+                and datasets.finance_questions):
+            from datasets.finance import sample_financial_stress_seed, format_financial_seed
+            seed = sample_financial_stress_seed(sim_a.simoleons)
+            if seed:
+                candidates.append((format_financial_seed(seed), 1.2))
+
     # Deep support — MentalChat (friendship > 65 + target has active fears)
     if (
         datasets is not None
