@@ -43,6 +43,7 @@ class StoryRunner:
         engine._bus.on("interaction_resolved", self._on_interaction)
         engine._bus.on("career_event", self._on_career)
         engine._bus.on("life_event", self._on_life)
+        engine._bus.on("child_born", self._on_child_born)
         engine._bus.on("tick_complete", self._on_tick_complete)
 
     # ── Event collectors ──────────────────────────────────────────────────────
@@ -77,6 +78,19 @@ class StoryRunner:
             "type": "life",
             "event_type": result.get("event_type", "life event"),
             "narrative": result.get("narrative", ""),
+        })
+
+    def _on_child_born(self, **kw):
+        child = kw["child"]
+        parent_a = kw["parent_a"]
+        parent_b = kw["parent_b"]
+        self._pending_events.append({
+            "type": "life",
+            "event_type": "child_born",
+            "narrative": (
+                f"{child.name} was born to {parent_a.name} and {parent_b.name}. "
+                f"The child inherited traits: {', '.join(child.profile['traits'])}."
+            ),
         })
 
     # ── Narration trigger ─────────────────────────────────────────────────────

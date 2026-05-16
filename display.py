@@ -225,6 +225,23 @@ def _on_interaction_queued(engine: SimEngine, **kwargs) -> None:
     )
 
 
+def _on_child_born(engine: SimEngine, **kwargs) -> None:
+    child = kwargs["child"]
+    parent_a = kwargs["parent_a"]
+    parent_b = kwargs["parent_b"]
+    p = child.profile
+    o = p["ocean"]
+    print(
+        f"\n  👶 NEW SIM — {child.name} born to {parent_a.name} & {parent_b.name}\n"
+        f"     ID: {child.sim_id}\n"
+        f"     Age: {p['age']}  |  {p['gender']}  |  {p['job']}\n"
+        f"     Traits: {', '.join(p['traits'])}  |  Aspiration: {p['aspiration']}\n"
+        f"     OCEAN: O={o['openness']}  C={o['conscientiousness']}  "
+        f"E={o['extraversion']}  A={o['agreeableness']}  N={o['neuroticism']}\n"
+        f"     Parents: {parent_a.sim_id} & {parent_b.sim_id}"
+    )
+
+
 def attach(engine: SimEngine) -> None:
     """Subscribe display callbacks to the engine event bus."""
     engine._bus.on("interaction_queued",
@@ -235,3 +252,5 @@ def attach(engine: SimEngine) -> None:
                    lambda **kw: _on_career_event(engine, **kw))
     engine._bus.on("life_event",
                    lambda **kw: _on_life_event(engine, **kw))
+    engine._bus.on("child_born",
+                   lambda **kw: _on_child_born(engine, **kw))

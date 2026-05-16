@@ -24,6 +24,7 @@ class WantsEngine:
         "Family": [
             ("spend quality time with someone close", "social", None),
             ("host a dinner", "social", None),
+            ("have a child with my partner", "social", None),
         ],
         "Popularity": [
             ("meet someone new", "social", None),

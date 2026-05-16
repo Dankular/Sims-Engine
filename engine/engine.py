@@ -207,6 +207,7 @@ class SimEngine:
                 "skills": sim.skills.levels,
                 "ocean": sim.profile["ocean"],
                 "household_id": sim.household_id,
+                "parent_ids": sim.parent_ids,
                 "relationships": rels,
             })
         hour = (GAME_START_HOUR + self._tick_count) % 24
@@ -474,8 +475,26 @@ class SimEngine:
             sim_b = self._sim_lookup.get(id_b)
             if sim_a is None or sim_b is None:
                 continue
+
+            # Child spawning: partners who want a family
+            if rec.romance >= 80 and not fired:
+                wants_family_a = (
+                    sim_a.profile["aspiration"] == "Family"
+                    or "family-oriented" in sim_a.profile["traits"]
+                    or any("child" in w.description for w in sim_a.active_wants)
+                )
+                wants_family_b = (
+                    sim_b.profile["aspiration"] == "Family"
+                    or "family-oriented" in sim_b.profile["traits"]
+                    or any("child" in w.description for w in sim_b.active_wants)
+                )
+                if (wants_family_a or wants_family_b) and random.random() < 0.20:
+                    self._spawn_child(sim_a, sim_b)
+                    fired = True
+                    break
+
             # Romance milestone: dating → partners
-            if 55 <= rec.romance < 65:
+            if 55 <= rec.romance < 65 and not fired:
                 self._run_life_event(
                     sim_a, sim_b,
                     event_type="relationship_milestone",
@@ -483,8 +502,9 @@ class SimEngine:
                 )
                 fired = True
                 break
+
             # Friendship milestone: close → best friends
-            if REL_CLOSE <= rec.friendship < REL_BEST and random.random() < 0.4:
+            if REL_CLOSE <= rec.friendship < REL_BEST and random.random() < 0.4 and not fired:
                 self._run_life_event(
                     sim_a, sim_b,
                     event_type="friendship_milestone",
@@ -492,11 +512,47 @@ class SimEngine:
                 )
                 fired = True
                 break
+
         if not fired:
             sim_a = random.choice(self.sims)
             others = [s for s in self.sims if s is not sim_a]
             sim_b = random.choice(others) if others else None
             self._run_life_event(sim_a, sim_b)
+
+    def _spawn_child(self, parent_a: Sim, parent_b: Sim) -> Sim:
+        """Create a child sim from two partner sims and add them to the world."""
+        from identity.profile_factory import generate_child_profile
+        from core.sim import Sim as SimClass
+
+        okcupid_essays = self._datasets.okcupid_essays if self._datasets else None
+        profile = generate_child_profile(parent_a.profile, parent_b.profile, okcupid_essays)
+        child = SimClass(profile)
+        child.simoleons = random.uniform(200, 800)
+        child.lod_tier = LODTier.ACTIVE
+
+        self.sims.append(child)
+        self._sim_lookup[child.sim_id] = child
+
+        # Inherit household from parent_a if one exists
+        if parent_a.household_id:
+            child.household_id = parent_a.household_id
+            for hh in self.households:
+                if hh.id == parent_a.household_id:
+                    hh.member_ids.append(child.sim_id)
+                    break
+
+        logger.info(
+            "[Child] %s born to %s & %s (id=%s)",
+            child.name, parent_a.name, parent_b.name, child.sim_id,
+        )
+        self._bus.emit(
+            "child_born",
+            child=child,
+            parent_a=parent_a,
+            parent_b=parent_b,
+            tick=self._tick_count,
+        )
+        return child
 
     def _run_life_event(self, sim_a: Sim, sim_b: Sim | None, event_type: str | None = None, context: str | None = None) -> None:
         if event_type is None:

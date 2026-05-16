@@ -55,6 +55,14 @@ class Sim:
     def ocean(self) -> dict:
         return self.profile["ocean"]
 
+    @property
+    def parent_ids(self) -> list[str]:
+        return self.profile.get("parent_ids", [])
+
+    @property
+    def is_child_of(self) -> bool:
+        return len(self.parent_ids) > 0
+
     def is_on_cooldown(self, action: str, current_tick: int) -> bool:
         return current_tick - self._action_cooldowns.get(action, -999) < COOLDOWN_TICKS
 
