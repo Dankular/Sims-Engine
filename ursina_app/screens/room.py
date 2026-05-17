@@ -3,15 +3,15 @@ ursina_app/screens/room.py — Global multiplayer isometric room.
 
 Layout (Habbo Hotel / Neopets style):
   ┌────────────────────────────────────────────────────────────┐
-  │ [Room name + player count]          [Your sim: Alice ●joy] │
+  │ [Room name + player count]          [Your sim: Alice ojoy] │
   │                                                            │
   │        I S O M E T R I C   R O O M   V I E W              │
   │   (floor tiles, walls, furniture, walking sim avatars)     │
   │                                                            │
   │ ┌─────────────────────────────────────┐  ┌──────────────┐ │
   │ │ Event log (last 6 events, scrolling)│  │  PLAYERS     │ │
-  │ │ Alice said hi to Bob                │  │  ● Alice     │ │
-  │ │ Carol joined the room               │  │  ● Bob       │ │
+  │ │ Alice said hi to Bob                │  │  o Alice     │ │
+  │ │ Carol joined the room               │  │  o Bob       │ │
   │ └─────────────────────────────────────┘  └──────────────┘ │
   │ [Chat: ________________________] [Send]                    │
   └────────────────────────────────────────────────────────────┘
@@ -83,8 +83,8 @@ class GlobalRoomScreen:
 
         self._setup_camera()
         self._build_room_visuals()
-        self._build_local_avatar()
         self._build_ui()
+        self._build_local_avatar()
         self._connect_nats(nats_url)
 
     # ── Camera (isometric) ────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ class GlobalRoomScreen:
         self._entities.append(top_bar)
 
         self._room_label = Text(
-            "✦  Global Room  ✦",
+            "*  Global Room  *",
             scale=1.0,
             color=color.rgb(255, 220, 100),
             position=(-0.72, 0.455),
@@ -205,7 +205,7 @@ class GlobalRoomScreen:
         self._entities.append(pl_lbl)
 
         self._players_text = Text(
-            f"● {self._name} (you)",
+            f"o {self._name} (you)",
             scale=0.72,
             color=_TEXT,
             position=(0.295, -0.285),
@@ -366,9 +366,9 @@ class GlobalRoomScreen:
     # ── Player list ───────────────────────────────────────────────────────────
 
     def _refresh_player_list(self) -> None:
-        lines = [f"● {self._name} (you)"]
+        lines = [f"o {self._name} (you)"]
         for av in self._peer_avatars.values():
-            lines.append(f"● {av.sim_name}")
+            lines.append(f"o {av.sim_name}")
         self._players_text.text = "\n".join(lines[:10])
         total = 1 + len(self._peer_avatars)
         self._player_count_lbl.text = (

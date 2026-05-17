@@ -87,8 +87,8 @@ def build_room(parent: Entity) -> list[Entity]:
     # ── Furniture ──────────────────────────────────────────────────────────────
 
     # Round table near center
-    make("cylinder", FURNITURE["table"], Vec3(4, 0.45, 5), scale=(0.8, 0.1, 0.8))
-    make("cylinder", FURNITURE["table"], Vec3(4, 0.22, 5), scale=(0.15, 0.45, 0.15))
+    make("cube", FURNITURE["table"], Vec3(4, 0.45, 5), scale=(0.8, 0.1, 0.8))
+    make("cube", FURNITURE["table"], Vec3(4, 0.22, 5), scale=(0.15, 0.45, 0.15))
 
     # Chairs around table
     for dx, dz in [(-1.2, 0), (1.2, 0), (0, -1.2), (0, 1.2)]:
@@ -111,15 +111,15 @@ def build_room(parent: Entity) -> list[Entity]:
              Vec3(1, 0.15 + i * 0.45, 8.55), scale=(1.3, 0.08, 0.1))
 
     # Plant in left corner
-    make("cylinder", FURNITURE["plant"],
+    make("cube", FURNITURE["plant"],
          Vec3(0.5, 0.5, 8.5), scale=(0.4, 1.0, 0.4))
     make("sphere", color.rgb(50, 170, 50),
          Vec3(0.5, 1.15, 8.5), scale=(0.7, 0.7, 0.7))
-    make("cylinder", color.rgb(140, 100, 60),
+    make("cube", color.rgb(140, 100, 60),
          Vec3(0.5, 0.2, 8.5), scale=(0.5, 0.4, 0.5))
 
     # Lamp near right side
-    make("cylinder", FURNITURE["lamp"],
+    make("cube", FURNITURE["lamp"],
          Vec3(7.5, 0.8, 7.5), scale=(0.15, 1.6, 0.15))
     make("sphere", color.rgb(255, 245, 180),
          Vec3(7.5, 1.7, 7.5), scale=(0.45, 0.45, 0.45))

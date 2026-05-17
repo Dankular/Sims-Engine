@@ -9,7 +9,7 @@ Layout:
   │                                                     │
   │  Name:  [________________________]                  │
   │                                                     │
-  │  Colour:  ● ● ● ● ● ● ● ●                           │
+  │  Colour:  o o o o o o o o                           │
   │                                                     │
   │  Aspiration: [Fortune ▼]                            │
   │                                                     │
@@ -134,7 +134,7 @@ class CustomizationScreen:
 
         # ── Panel background ──────────────────────────────────────────────
         panel = Panel(
-            model="rounded_cube",
+            model="quad",
             color=color.rgba(35, 35, 55, 220),
             scale=(0.6, 0.9),
             position=(0.18, 0),
@@ -144,7 +144,7 @@ class CustomizationScreen:
 
         # ── Title ─────────────────────────────────────────────────────────
         title = Text(
-            "✦  CUSTOMIZE YOUR SIM  ✦",
+            "*  CUSTOMIZE YOUR SIM  *",
             color=_TITLE_COL,
             scale=1.4,
             position=(0.18, 0.38),
@@ -235,7 +235,7 @@ class CustomizationScreen:
 
         # ── Enter room button ─────────────────────────────────────────────
         enter_btn = Button(
-            text="✦  ENTER GLOBAL ROOM  ✦",
+            text="*  ENTER GLOBAL ROOM  *",
             scale=(0.44, 0.06),
             position=(0.18, -0.28),
             color=_BTN_COL,
