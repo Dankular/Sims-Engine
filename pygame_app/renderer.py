@@ -97,6 +97,31 @@ def _clamp_text(font, text: str, max_w: int) -> str:
     return text + "…"
 
 
+def _wrap_text(font, text: str, max_w: int) -> list[str]:
+    """Break text into lines that fit within max_w pixels."""
+    if not text:
+        return []
+    if font.size(text)[0] <= max_w:
+        return [text]
+    words  = text.split()
+    lines  = []
+    line   = ""
+    for word in words:
+        test = (line + " " + word).strip()
+        if font.size(test)[0] <= max_w:
+            line = test
+        else:
+            if line:
+                lines.append(line)
+            # If a single word is wider than max_w, clamp it
+            if font.size(word)[0] > max_w:
+                word = _clamp_text(font, word, max_w)
+            line = word
+    if line:
+        lines.append(line)
+    return lines
+
+
 class Renderer:
     def __init__(self, surface: pygame.Surface):
         self.surf = surface
@@ -440,36 +465,52 @@ class Renderer:
 
         y = CONTENT_Y + 22
         for entry in event_log:
-            if y + 14 > BOT_Y:
+            if y + 16 > BOT_Y:
                 break
-            y = self._draw_feed_entry(entry, x0, y, w)
+            y = self._draw_feed_entry(entry, x0, y, w, y_max=BOT_Y - 2)
 
-    def _draw_feed_entry(self, entry: dict, x0: int, y: int, w: int) -> int:
+    def _draw_feed_entry(self, entry: dict, x0: int, y: int, w: int, y_max: int = 0) -> int:
         icon  = entry.get("icon", "·")
         text  = entry.get("text", "")
         col   = entry.get("colour", C.TEXT)
         sub   = entry.get("sub", [])
+        if y_max == 0:
+            y_max = BOT_Y - 4
 
-        # Icon
+        # Icon — pinned to first line
         ic = self.f_sm.render(icon[:2], True, col)
         self.surf.blit(ic, (x0 + 4, y))
 
-        # Main text
-        t = _clamp_text(self.f_sm, text, w - 28)
-        ts = self.f_sm.render(t, True, col)
-        self.surf.blit(ts, (x0 + 22, y))
-        y += 15
+        # Main text — word-wrapped, indented after icon
+        text_x    = x0 + 22
+        wrap_w    = w - 26
+        lines     = _wrap_text(self.f_sm, text, wrap_w)
+        line_h    = 15
+        for i, line in enumerate(lines):
+            if y + line_h > y_max:
+                break
+            lx = text_x if i == 0 else x0 + 4   # indent continuation lines
+            ls = self.f_sm.render(line, True, col)
+            self.surf.blit(ls, (lx, y))
+            y += line_h
 
-        # Sub-lines (model trace, reaction, etc.)
+        # Sub-lines — word-wrapped, slightly smaller font
+        sub_x  = x0 + 8
+        sub_w  = w - 12
+        sub_h  = 13
         for sl_text, sl_col in sub:
-            t2 = _clamp_text(self.f_xs, sl_text, w - 20)
-            ss = self.f_xs.render(t2, True, sl_col)
-            self.surf.blit(ss, (x0 + 20, y))
-            y += 13
+            sub_lines = _wrap_text(self.f_xs, sl_text, sub_w)
+            for sl in sub_lines:
+                if y + sub_h > y_max:
+                    break
+                ss = self.f_xs.render(sl, True, sl_col)
+                self.surf.blit(ss, (sub_x, y))
+                y += sub_h
 
         # Separator
-        pygame.draw.line(self.surf, C.BORDER, (x0 + 4, y + 1), (x0 + w - 8, y + 1), 1)
-        return y + 4
+        if y + 3 <= y_max:
+            pygame.draw.line(self.surf, C.BORDER, (x0 + 4, y + 2), (x0 + w - 8, y + 2), 1)
+        return y + 5
 
     # ── Selected sim detail ───────────────────────────────────────────────────
 
