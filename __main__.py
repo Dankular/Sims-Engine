@@ -65,8 +65,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-datasets", action="store_true", help="Skip dataset loading")
     p.add_argument(
         "--story",
-        action="store_true",
-        help="Enable story narration + TTS after each tick",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable or disable story narration + TTS after each tick (default: enabled)",
     )
     p.add_argument(
         "--narrate-every",
@@ -75,15 +76,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Narrate every N ticks (default: 1)",
     )
     p.add_argument(
-        "--tts-steps", type=int, default=32,
-        help="OmniVoice diffusion steps — higher = slower but better (default: 32)"
+        "--tts-steps",
+        type=int,
+        default=32,
+        help="OmniVoice diffusion steps — higher = slower but better (default: 32)",
     )
     p.add_argument(
         "--tts-speed", type=float, default=1.0, help="TTS speed 0.7-2.0 (default: 1.0)"
     )
     p.add_argument(
-        "--tts-device", default="cpu",
-        help="OmniVoice device: 'cpu' or 'cuda:0' (default: cpu)"
+        "--tts-device",
+        default="cpu",
+        help="OmniVoice device: 'cpu' or 'cuda:0' (default: cpu)",
     )
     p.add_argument(
         "--no-audio-save", action="store_true", help="Don't save audio files to disk"
@@ -105,8 +109,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--export-chapter-size",
-        type=int, default=10,
+        type=int,
+        default=10,
         help="Number of ticks per exported story chapter (default: 10)",
+    )
+    p.add_argument(
+        "--analytics",
+        action="store_true",
+        help="Track metrics and generate post-run analytics report (charts + summary JSON)",
+    )
+    p.add_argument(
+        "--analytics-dir",
+        default="reports",
+        help="Output directory for analytics charts (default: reports/)",
     )
     p.add_argument(
         "--voice-language",
@@ -278,10 +293,20 @@ def main() -> None:
     # Narrative export layer (Gap 1)
     if args.export_story:
         from narrative.exporter import StoryExporter
+
         _exporter = StoryExporter(engine, chapter_size=args.export_chapter_size)
-        print(f"[INFO] Story export ON — chapters every {args.export_chapter_size} ticks → exports/\n")
+        print(
+            f"[INFO] Story export ON — chapters every {args.export_chapter_size} ticks → exports/\n"
+        )
     else:
         _exporter = None
+
+    # Analytics tracker
+    _tracker = None
+    if args.analytics:
+        from analytics.tracker import SimTracker
+        _tracker = SimTracker(engine)
+        print(f"[INFO] Analytics tracking ON → {args.analytics_dir}/\n")
 
     print(f"\n[INFO] Starting simulation — {args.ticks} ticks\n")
     try:
@@ -289,6 +314,8 @@ def main() -> None:
             print_tick_header(engine)
             engine.run_tick()
             print_active_sims(engine)
+            if _tracker:
+                _tracker.snapshot(engine.tick_count)
             time.sleep(args.delay)
     except KeyboardInterrupt:
         print("\n[Interrupted by user]")
@@ -307,6 +334,14 @@ def main() -> None:
         _exporter.flush_now()
 
     print_summary(engine)
+
+    # Generate analytics report
+    if _tracker:
+        from analytics.report import generate
+        print("\n[INFO] Generating analytics report...")
+        report_dir = generate(_tracker, output_dir=args.analytics_dir)
+        print(f"[INFO] Report saved → {report_dir}\n")
+
     engine.shutdown()
     print("\n[INFO] Done.\n")
 

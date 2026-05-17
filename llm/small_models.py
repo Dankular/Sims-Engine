@@ -3,70 +3,53 @@ llm/small_models.py — Central registry for all small inference models.
 
 Each model is lazy-loaded on first call, CPU-optimised, and returns None
 on failure so every caller can fall back to the existing hardcoded logic.
-Thread-safe singletons; HF_HUB_OFFLINE is temporarily lifted during load.
+Thread-safe singletons with local-first model loading.
 """
+
 from __future__ import annotations
 
 import logging
-import os
 import threading
-from contextlib import contextmanager
 from typing import Any
 
 logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 
 # ── Singletons ────────────────────────────────────────────────────────────────
-_ZERO_SHOT: Any      = None    # cross-encoder/nli-deberta-v3-small
-_GOAL_NLI: Any       = None    # typeform/distilbert-base-uncased-mnli
-_SENTIMENT: Any      = None    # cardiffnlp/twitter-roberta-base-sentiment-latest
-_EKMAN: Any          = None    # j-hartmann/emotion-english-distilroberta-base
-_CROSS_ENCODER: Any  = None    # cross-encoder/ms-marco-MiniLM-L-6-v2
-_COMET: Any          = None    # allenai/comet-distil  (tuple: model, tokenizer)
-_REWARD: Any         = None    # OpenAssistant/reward-model-deberta-v3-large-v2
+_ZERO_SHOT: Any = None  # cross-encoder/nli-deberta-v3-small
+_GOAL_NLI: Any = None  # typeform/distilbert-base-uncased-mnli
+_SENTIMENT: Any = None  # cardiffnlp/twitter-roberta-base-sentiment-latest
+_EKMAN: Any = None  # j-hartmann/emotion-english-distilroberta-base
+_CROSS_ENCODER: Any = None  # cross-encoder/ms-marco-MiniLM-L-6-v2
+_COMET: Any = None  # allenai/comet-distil  (tuple: model, tokenizer)
+_REWARD: Any = None  # OpenAssistant/reward-model-deberta-v3-large-v2
 
-_SENTINEL = object()           # distinguishes "not loaded" from None result
-
-
-@contextmanager
-def _hf_online():
-    """Temporarily disable the HF offline flag set by ocean_scorer.py."""
-    import huggingface_hub.constants as _hf
-    _saved = _hf.HF_HUB_OFFLINE
-    _env = {k: os.environ.pop(k, None) for k in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")}
-    _hf.HF_HUB_OFFLINE = False
-    try:
-        yield
-    finally:
-        _hf.HF_HUB_OFFLINE = _saved
-        for k, v in _env.items():
-            if v is not None:
-                os.environ[k] = v
+_SENTINEL = object()  # distinguishes "not loaded" from None result
 
 
 def _load_pipeline(model_id: str, task: str, **kw) -> Any:
     """Load a HuggingFace pipeline: local first, then download, CPU only."""
     from transformers import pipeline as _p
-    with _hf_online():
-        for local in (True, False):
-            try:
-                return _p(
-                    task, model=model_id,
-                    local_files_only=local,
-                    device=-1,
-                    # Suppress the background safetensors conversion thread
-                    # which hits the HF_HUB_OFFLINE flag and logs a noisy error
-                    token=None,
-                    **kw,
-                )
-            except Exception:
-                if local:
-                    continue
+
+    for local in (True, False):
+        try:
+            return _p(
+                task,
+                model=model_id,
+                local_files_only=local,
+                device=-1,
+                token=None,
+                **kw,
+            )
+        except Exception:
+            if local:
+                continue
     logger.warning("[SmallModel] Could not load %s", model_id)
     return None
 
 
 # ── Public getters ────────────────────────────────────────────────────────────
+
 
 def get_zero_shot():
     """
@@ -80,7 +63,11 @@ def get_zero_shot():
         if _ZERO_SHOT is None:
             try:
                 from config import NLI_SMALL_MODEL
-                _ZERO_SHOT = _load_pipeline(NLI_SMALL_MODEL, "zero-shot-classification") or _SENTINEL
+
+                _ZERO_SHOT = (
+                    _load_pipeline(NLI_SMALL_MODEL, "zero-shot-classification")
+                    or _SENTINEL
+                )
             except Exception as exc:
                 logger.debug("zero-shot load failed: %s", exc)
                 _ZERO_SHOT = _SENTINEL
@@ -98,7 +85,11 @@ def get_goal_nli():
         if _GOAL_NLI is None:
             try:
                 from config import GOAL_NLI_MODEL
-                _GOAL_NLI = _load_pipeline(GOAL_NLI_MODEL, "zero-shot-classification") or _SENTINEL
+
+                _GOAL_NLI = (
+                    _load_pipeline(GOAL_NLI_MODEL, "zero-shot-classification")
+                    or _SENTINEL
+                )
             except Exception as exc:
                 logger.debug("goal-nli load failed: %s", exc)
                 _GOAL_NLI = _SENTINEL
@@ -117,7 +108,10 @@ def get_sentiment():
         if _SENTIMENT is None:
             try:
                 from config import SENTIMENT_MODEL
-                _SENTIMENT = _load_pipeline(SENTIMENT_MODEL, "text-classification") or _SENTINEL
+
+                _SENTIMENT = (
+                    _load_pipeline(SENTIMENT_MODEL, "text-classification") or _SENTINEL
+                )
             except Exception as exc:
                 logger.debug("sentiment load failed: %s", exc)
                 _SENTIMENT = _SENTINEL
@@ -136,7 +130,11 @@ def get_ekman():
         if _EKMAN is None:
             try:
                 from config import EKMAN_MODEL
-                _EKMAN = _load_pipeline(EKMAN_MODEL, "text-classification", top_k=None) or _SENTINEL
+
+                _EKMAN = (
+                    _load_pipeline(EKMAN_MODEL, "text-classification", top_k=None)
+                    or _SENTINEL
+                )
             except Exception as exc:
                 logger.debug("ekman load failed: %s", exc)
                 _EKMAN = _SENTINEL
@@ -149,18 +147,25 @@ class _TransformersCrossEncoder:
     scoring.  Uses pure transformers — avoids the sentence_transformers /
     local-datasets namespace collision on this project.
     """
+
     def __init__(self, model, tokenizer):
         self._model = model
-        self._tok   = tokenizer
+        self._tok = tokenizer
 
-    def predict(self, pairs: list[tuple[str, str]], show_progress_bar: bool = False) -> list[float]:
+    def predict(
+        self, pairs: list[tuple[str, str]], show_progress_bar: bool = False
+    ) -> list[float]:
         import torch
-        queries   = [p[0] for p in pairs]
-        passages  = [p[1] for p in pairs]
+
+        queries = [p[0] for p in pairs]
+        passages = [p[1] for p in pairs]
         enc = self._tok(
-            queries, passages,
-            padding=True, truncation=True,
-            max_length=512, return_tensors="pt",
+            queries,
+            passages,
+            padding=True,
+            truncation=True,
+            max_length=512,
+            return_tensors="pt",
         )
         with torch.no_grad():
             logits = self._model(**enc).logits.squeeze(-1)
@@ -184,22 +189,24 @@ def get_cross_encoder():
                     AutoModelForSequenceClassification,
                 )
                 from config import CROSS_ENCODER_MODEL
-                with _hf_online():
-                    for local in (True, False):
-                        try:
-                            tok = AutoTokenizer.from_pretrained(
-                                CROSS_ENCODER_MODEL, local_files_only=local
-                            )
-                            mdl = AutoModelForSequenceClassification.from_pretrained(
-                                CROSS_ENCODER_MODEL, local_files_only=local
-                            )
-                            mdl.eval()
-                            _CROSS_ENCODER = _TransformersCrossEncoder(mdl, tok)
-                            logger.info("[SmallModel] CrossEncoder loaded: %s", CROSS_ENCODER_MODEL)
-                            break
-                        except Exception:
-                            if local:
-                                continue
+
+                for local in (True, False):
+                    try:
+                        tok = AutoTokenizer.from_pretrained(
+                            CROSS_ENCODER_MODEL, local_files_only=local
+                        )
+                        mdl = AutoModelForSequenceClassification.from_pretrained(
+                            CROSS_ENCODER_MODEL, local_files_only=local
+                        )
+                        mdl.eval()
+                        _CROSS_ENCODER = _TransformersCrossEncoder(mdl, tok)
+                        logger.info(
+                            "[SmallModel] CrossEncoder loaded: %s", CROSS_ENCODER_MODEL
+                        )
+                        break
+                    except Exception:
+                        if local:
+                            continue
                 if _CROSS_ENCODER is None:
                     _CROSS_ENCODER = _SENTINEL
             except Exception as exc:
@@ -223,22 +230,22 @@ def get_comet() -> tuple[Any, Any] | None:
             try:
                 from transformers import T5ForConditionalGeneration, T5Tokenizer
                 from config import COMET_MODEL
-                with _hf_online():
-                    for local in (True, False):
-                        try:
-                            tok = T5Tokenizer.from_pretrained(
-                                COMET_MODEL, local_files_only=local, legacy=False
-                            )
-                            mdl = T5ForConditionalGeneration.from_pretrained(
-                                COMET_MODEL, local_files_only=local
-                            )
-                            mdl.eval()
-                            _COMET = (mdl, tok)
-                            logger.info("[SmallModel] COMET(flan-t5-small) loaded")
-                            break
-                        except Exception:
-                            if local:
-                                continue
+
+                for local in (True, False):
+                    try:
+                        tok = T5Tokenizer.from_pretrained(
+                            COMET_MODEL, local_files_only=local, legacy=False
+                        )
+                        mdl = T5ForConditionalGeneration.from_pretrained(
+                            COMET_MODEL, local_files_only=local
+                        )
+                        mdl.eval()
+                        _COMET = (mdl, tok)
+                        logger.info("[SmallModel] COMET(flan-t5-small) loaded")
+                        break
+                    except Exception:
+                        if local:
+                            continue
                 if _COMET is None:
                     _COMET = _SENTINEL
             except Exception as exc:
@@ -259,7 +266,10 @@ def get_reward():
         if _REWARD is None:
             try:
                 from config import REWARD_MODEL
-                _REWARD = _load_pipeline(REWARD_MODEL, "text-classification") or _SENTINEL
+
+                _REWARD = (
+                    _load_pipeline(REWARD_MODEL, "text-classification") or _SENTINEL
+                )
             except Exception as exc:
                 logger.debug("reward-model load failed: %s", exc)
                 _REWARD = _SENTINEL
@@ -267,6 +277,7 @@ def get_reward():
 
 
 # ── Helper utilities ──────────────────────────────────────────────────────────
+
 
 def sentiment_to_modifier(pipeline_result: list[dict]) -> float:
     """
@@ -278,16 +289,16 @@ def sentiment_to_modifier(pipeline_result: list[dict]) -> float:
     label = pipeline_result[0].get("label", "neutral").lower()
     score = float(pipeline_result[0].get("score", 0.5))
     if "positive" in label:
-        return 0.8 + score * 0.7       # 0.80–1.50
+        return 0.8 + score * 0.7  # 0.80–1.50
     if "negative" in label:
         return 0.5 + (1.0 - score) * 0.4  # 0.50–0.90
-    return 1.0                          # neutral
+    return 1.0  # neutral
 
 
 # flan-t5 instruction prompts for each ATOMIC relation
 _COMET_PROMPTS: dict[str, str] = {
     "xReact": "Answer in a few words: If someone {event}, how do they feel emotionally?",
-    "xWant":  "Answer in a few words: If someone {event}, what would they want to do next?",
+    "xWant": "Answer in a few words: If someone {event}, what would they want to do next?",
     "oReact": "Answer in a few words: If someone {event}, how would nearby people react?",
 }
 
@@ -310,8 +321,11 @@ def comet_infer(event_text: str, relations: list[str] | None = None) -> dict[str
             continue
         try:
             import torch
+
             prompt = prompt_template.format(event=event_text[:120])
-            enc = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=128)
+            enc = tokenizer(
+                prompt, return_tensors="pt", truncation=True, max_length=128
+            )
             with torch.no_grad():
                 out = model.generate(
                     **enc, max_new_tokens=20, num_beams=2, early_stopping=True
@@ -324,8 +338,9 @@ def comet_infer(event_text: str, relations: list[str] | None = None) -> dict[str
     return results
 
 
-def zero_shot_classify(text: str, labels: list[str],
-                       pipeline=None, threshold: float = 0.35) -> tuple[str, float] | None:
+def zero_shot_classify(
+    text: str, labels: list[str], pipeline=None, threshold: float = 0.35
+) -> tuple[str, float] | None:
     """
     Run zero-shot classification; returns (best_label, score) or None.
     Falls back gracefully if model unavailable.

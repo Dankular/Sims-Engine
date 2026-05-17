@@ -47,19 +47,20 @@ def _heuristic_fallback(sim_a, sim_b, relationship) -> None:
 def _llm_background_interaction(sim_a, sim_b, relationship, bg_llm) -> None:
     """Single-shot compact LLM adjudication for BACKGROUND tier sims."""
     prompt = (
-        f"Two sims interact briefly. Return JSON only.\n"
+        f"Two sims interact. Natural dialogue and light narration are allowed. Return JSON only.\n"
         f"Sim A: {sim_a.name} | traits={sim_a.profile['traits']} | "
         f"emotion={sim_a.emotion.dominant} | O={sim_a.ocean['openness']:.1f} "
         f"A={sim_a.ocean['agreeableness']:.1f}\n"
         f"Sim B: {sim_b.name} | traits={sim_b.profile['traits']} | "
         f"emotion={sim_b.emotion.dominant}\n"
         f"Relationship: {relationship.state_label()} (F={relationship.friendship:.0f})\n"
-        f"Return: {{\"friendship_delta\": <-5 to 5>, \"valence\": <-1.0 to 1.0>, "
-        f"\"memory\": \"<brief tag>\"}}"
+        f'Return: {{"friendship_delta": <-5 to 5>, "valence": <-1.0 to 1.0>, '
+        f'"memory": "<short narrative memory>"}}'
     )
     system = "You are a sim interaction adjudicator. Respond with valid JSON only."
     try:
         import json, re
+
         raw = bg_llm.chat(system=system, user=prompt, max_tokens=80, temperature=0.7)
         raw = re.sub(r"<think>[\s\S]*?</think>", "", raw).strip()
         if raw.startswith("```"):
@@ -72,7 +73,9 @@ def _llm_background_interaction(sim_a, sim_b, relationship, bg_llm) -> None:
         sim_b.needs.restore("social", random.uniform(2, 6) * max(0, valence))
         if data.get("memory"):
             relationship.add_memory(data["memory"], valence)
-        logger.debug("[BG] %s↔%s fd=%+.1f val=%.2f", sim_a.name, sim_b.name, fd, valence)
+        logger.debug(
+            "[BG] %s↔%s fd=%+.1f val=%.2f", sim_a.name, sim_b.name, fd, valence
+        )
     except Exception as exc:
         logger.debug("BG LLM failed (%s) — heuristic fallback", exc)
         _heuristic_fallback(sim_a, sim_b, relationship)

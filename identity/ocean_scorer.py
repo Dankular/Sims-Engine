@@ -5,13 +5,18 @@ import os
 import random
 
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from config import HF_PERSONALITY_MODEL
 
 logger = logging.getLogger(__name__)
 
-_OCEAN_KEYS = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
+_OCEAN_KEYS = [
+    "openness",
+    "conscientiousness",
+    "extraversion",
+    "agreeableness",
+    "neuroticism",
+]
 
 _tokenizer = None
 _model = None
@@ -27,6 +32,7 @@ def _load_model() -> bool:
         import torch
         import transformers as _tf
         from transformers import RobertaForSequenceClassification, RobertaTokenizer
+
         _tf.logging.set_verbosity_error()
 
         _local = True
@@ -61,6 +67,7 @@ def _load_model() -> bool:
         #   output_layer.*  → classifier.out_proj.* (final projection layer)
         try:
             from huggingface_hub import hf_hub_download
+
             ckpt_path = hf_hub_download(
                 repo_id=HF_PERSONALITY_MODEL,
                 filename="pytorch_model.bin",
@@ -69,9 +76,9 @@ def _load_model() -> bool:
             raw_state = torch.load(ckpt_path, map_location="cpu", weights_only=True)
             _HEAD_MAP = {
                 "hidden_layer.weight": "classifier.dense.weight",
-                "hidden_layer.bias":   "classifier.dense.bias",
+                "hidden_layer.bias": "classifier.dense.bias",
                 "output_layer.weight": "classifier.out_proj.weight",
-                "output_layer.bias":   "classifier.out_proj.bias",
+                "output_layer.bias": "classifier.out_proj.bias",
             }
             remapped = {}
             for k, v in raw_state.items():
@@ -82,14 +89,17 @@ def _load_model() -> bool:
                 # drop any remaining unknown keys
             _model.load_state_dict(remapped, strict=False)
         except Exception as remap_exc:
-            logger.debug("Key remap skipped (%s) — using from_pretrained weights", remap_exc)
+            logger.debug(
+                "Key remap skipped (%s) — using from_pretrained weights", remap_exc
+            )
 
         _model.eval()
         logger.info("KevSun/Personality_LM loaded successfully")
         return True
     except Exception as exc:
         logger.warning(
-            "KevSun/Personality_LM unavailable (%s) — OCEAN will use seeded random fallback", exc
+            "KevSun/Personality_LM unavailable (%s) — OCEAN will use seeded random fallback",
+            exc,
         )
         _model = None
         _tokenizer = None
@@ -105,6 +115,7 @@ def ocean_from_text(text: str | None = None) -> dict:
     if text and _load_model() and _model is not None and _tokenizer is not None:
         try:
             import torch
+
             inputs = _tokenizer(
                 text,
                 return_tensors="pt",
@@ -142,6 +153,7 @@ def ocean_from_short_text(text: str) -> dict | None:
         _child_load_attempted = True
         import os
         import huggingface_hub.constants as _hf_const
+
         _offline_vars = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")
         _saved_env = {k: os.environ.pop(k, None) for k in _offline_vars}
         _saved_flag = _hf_const.HF_HUB_OFFLINE
@@ -149,9 +161,13 @@ def ocean_from_short_text(text: str) -> dict | None:
         try:
             from transformers import pipeline as _hf_pipeline
             from config import HF_CHILD_OCEAN_MODEL
+
             _child_model = _hf_pipeline(
-                "text-classification", model=HF_CHILD_OCEAN_MODEL,
-                top_k=None, truncation=True, max_length=256,
+                "text-classification",
+                model=HF_CHILD_OCEAN_MODEL,
+                top_k=None,
+                truncation=True,
+                max_length=256,
             )
             logger.info("Child OCEAN model loaded: %s", HF_CHILD_OCEAN_MODEL)
         except Exception as exc:
@@ -168,10 +184,15 @@ def ocean_from_short_text(text: str) -> dict | None:
 
     # Label mapping varies per model checkpoint — try common patterns
     _LABEL_ALIASES = {
-        "O": "openness", "C": "conscientiousness", "E": "extraversion",
-        "A": "agreeableness", "N": "neuroticism",
-        "openness": "openness", "conscientiousness": "conscientiousness",
-        "extraversion": "extraversion", "agreeableness": "agreeableness",
+        "O": "openness",
+        "C": "conscientiousness",
+        "E": "extraversion",
+        "A": "agreeableness",
+        "N": "neuroticism",
+        "openness": "openness",
+        "conscientiousness": "conscientiousness",
+        "extraversion": "extraversion",
+        "agreeableness": "agreeableness",
         "neuroticism": "neuroticism",
     }
     try:
@@ -179,8 +200,9 @@ def ocean_from_short_text(text: str) -> dict | None:
         scores = results[0] if isinstance(results[0], list) else results
         ocean: dict[str, float] = {}
         for item in scores:
-            key = _LABEL_ALIASES.get(item["label"].upper(),
-                  _LABEL_ALIASES.get(item["label"].lower()))
+            key = _LABEL_ALIASES.get(
+                item["label"].upper(), _LABEL_ALIASES.get(item["label"].lower())
+            )
             if key:
                 ocean[key] = round(float(item["score"]), 2)
         if len(ocean) == 5:
