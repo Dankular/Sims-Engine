@@ -136,6 +136,14 @@ class SimEngine:
             # Seasonal / time-of-day mood modulation (Tier 3, #11)
             self._apply_seasonal_mood(sim, hour)
 
+            # Elder effects (energy drain scales with age past 60)
+            if sim.profile.get("age", 0) >= 60:
+                try:
+                    from core.life_stage import elder_tick_effects
+                    elder_tick_effects(sim)
+                except Exception:
+                    pass
+
             # System 4: clear expired goals, set arc-state goals
             try:
                 from core.goals import clear_expired_goal, set_goal_from_arc
@@ -268,6 +276,14 @@ class SimEngine:
         # Gap 7: Cross-household social events (check every 15 ticks)
         if self._tick_count % 15 == 0 and len(self.households) >= 2:
             self._maybe_run_cross_household_event()
+
+        # Aging — advance age every TICKS_PER_YEAR ticks, check death
+        from config import TICKS_PER_YEAR
+        if self._tick_count % TICKS_PER_YEAR == 0:
+            self._advance_all_ages()
+
+        # Process any pending deaths from this tick
+        self._process_deaths()
 
         # Gap 8: Age-based inheritance (check every 50 ticks)
         if self._tick_count % 50 == 0:
@@ -1394,6 +1410,98 @@ class SimEngine:
             logger.debug("Group event failed: %s", exc)
 
     # ── Arc system helpers ────────────────────────────────────────────────────
+
+    # ── Life cycle ───────────────────────────────────────────────────────────────
+
+    def _advance_all_ages(self) -> None:
+        """Called every TICKS_PER_YEAR ticks. Ages sims, fires transitions, marks deaths."""
+        from core.life_stage import advance_age, apply_stage_transition, should_die, elder_tick_effects
+
+        for sim in list(self.sims):
+            new_age, old_stage, new_stage = advance_age(sim)
+
+            # Life stage transition
+            if old_stage != new_stage:
+                msgs = apply_stage_transition(sim, old_stage, new_stage)
+                for m in msgs:
+                    logger.info("[AGE] %s", m)
+                self._bus.emit(
+                    "stage_transition",
+                    sim=sim,
+                    old_stage=old_stage,
+                    new_stage=new_stage,
+                    age=new_age,
+                    tick=self._tick_count,
+                )
+
+            # Birthday log
+            logger.info("[AGE] %s is now %d (%s)", sim.name, new_age, new_stage)
+
+            # Check natural death
+            if should_die(sim) and not getattr(sim, "_death_queued", False):
+                sim._death_queued = True
+                logger.info("[DEATH] %s age %d — natural causes", sim.name, new_age)
+                self._queue_death(sim)
+
+        # Elder extra tick effects (energy drain)
+        for sim in self.sims:
+            if sim.profile.get("age", 0) >= 60:
+                elder_tick_effects(sim)
+
+    def _queue_death(self, sim: Sim) -> None:
+        """Fire the death life event and schedule sim removal."""
+        if not hasattr(self, "_death_queue"):
+            self._death_queue: list[str] = []
+        self._death_queue.append(sim.sim_id)
+
+        # Trigger grief in children and closest friends
+        from core.arcs import start_grief
+        for other in self.sims:
+            if other.sim_id == sim.sim_id:
+                continue
+            is_child = sim.sim_id in other.parent_ids
+            rel = self.relationships.get(sim.sim_id, other.sim_id)
+            is_close_friend = rel.friendship >= 60
+            if (is_child or is_close_friend) and other.grief_stage < 0:
+                start_grief(other, sim.name)
+                logger.info("[GRIEF] %s grieves for %s", other.name, sim.name)
+
+        # Inheritance
+        children = [s for s in self.sims if sim.sim_id in s.parent_ids]
+        if children and sim.simoleons > 0:
+            share = sim.simoleons / len(children)
+            for child in children:
+                child.simoleons += share
+                child.emotion.add("relief", 0.4, duration=4, source="inheritance")
+            logger.info(
+                "[INHERITANCE] %s → §%.0f to %d child(ren)",
+                sim.name, sim.simoleons, len(children),
+            )
+
+        self._bus.emit(
+            "sim_died",
+            sim=sim,
+            age=sim.profile.get("age", 0),
+            tick=self._tick_count,
+        )
+
+    def _process_deaths(self) -> None:
+        """Remove queued dead sims from the roster."""
+        if not hasattr(self, "_death_queue") or not self._death_queue:
+            return
+        for sim_id in self._death_queue:
+            self.sims = [s for s in self.sims if s.sim_id != sim_id]
+            self._sim_lookup.pop(sim_id, None)
+            # Cancel any pending interactions involving this sim
+            self._pending = [
+                p for p in self._pending
+                if p.sim_a_id != sim_id and p.sim_b_id != sim_id
+            ]
+        self._death_queue.clear()
+
+    @property
+    def all_sims_dead(self) -> bool:
+        return len(self.sims) == 0
 
     def _find_closest_friend_id(self, sim: Sim) -> str | None:
         """Return the sim_id of the sim with the highest friendship score, or None."""

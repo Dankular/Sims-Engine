@@ -121,6 +121,12 @@ SHOP_DEFS = [
 ]
 LOW_NEED_SHOP_THRESHOLD = 25
 
+# ── Aging & life cycle ───────────────────────────────────────────────────────
+TICKS_PER_YEAR      = 50    # 1 in-game year = this many ticks
+                             # full life (~75yr) = ~3750 ticks at delay=0
+CHILD_BIRTH_CHANCE  = 0.08  # probability per eligible couple per year
+MIN_POPULATION      = 1     # stop "until-death" run when below this
+
 # ── Life events ───────────────────────────────────────────────────────────────
 LIFE_EVENT_INTERVAL = 15
 LIFE_EVENT_CHANCE = 0.25

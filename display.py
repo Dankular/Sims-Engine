@@ -493,6 +493,37 @@ def _on_child_born(engine: "SimEngine", **kw) -> None:
         print(f"\n  👶 {child.name} born to {parent_a.name} & {parent_b.name}")
 
 
+def _on_stage_transition(engine: "SimEngine", **kw) -> None:
+    sim   = kw["sim"]
+    old   = kw["old_stage"].replace("_", " ")
+    new   = kw["new_stage"].replace("_", " ")
+    age   = kw["age"]
+    stage_colour = {
+        "teen": "yellow", "young adult": "bright_cyan",
+        "adult": "bright_white", "elder": "bright_blue",
+    }.get(new, "white")
+    if _RICH:
+        _console.print(
+            f"\n  [bold {stage_colour}]🎂 BIRTHDAY[/] — [bold]{sim.name}[/] "
+            f"turns [bold]{age}[/]  [dim]{old} → {new}[/]"
+        )
+    else:
+        print(f"\n  🎂 {sim.name} turns {age} ({old} → {new})")
+
+
+def _on_sim_died(engine: "SimEngine", **kw) -> None:
+    sim = kw["sim"]
+    age = kw["age"]
+    if _RICH:
+        _console.rule(
+            f"[bold bright_black]  ✝  {sim.name}  passed away at age {age}  "
+            f"[dim]{sim.profile.get('aspiration','?')} aspiration[/]",
+            style="bright_black",
+        )
+    else:
+        print(f"\n  ✝ {sim.name} passed away at age {age}")
+
+
 def attach(engine: "SimEngine") -> None:
     engine._bus.on(
         "interaction_queued", lambda **kw: _on_interaction_queued(engine, **kw)
@@ -500,9 +531,11 @@ def attach(engine: "SimEngine") -> None:
     engine._bus.on(
         "interaction_resolved", lambda **kw: _on_interaction_resolved(engine, **kw)
     )
-    engine._bus.on("career_event", lambda **kw: _on_career_event(engine, **kw))
-    engine._bus.on("life_event", lambda **kw: _on_life_event(engine, **kw))
-    engine._bus.on("child_born", lambda **kw: _on_child_born(engine, **kw))
+    engine._bus.on("career_event",     lambda **kw: _on_career_event(engine, **kw))
+    engine._bus.on("life_event",       lambda **kw: _on_life_event(engine, **kw))
+    engine._bus.on("child_born",       lambda **kw: _on_child_born(engine, **kw))
+    engine._bus.on("stage_transition", lambda **kw: _on_stage_transition(engine, **kw))
+    engine._bus.on("sim_died",         lambda **kw: _on_sim_died(engine, **kw))
 
 
 # ── Plain-text fallbacks (if rich not installed) ──────────────────────────────

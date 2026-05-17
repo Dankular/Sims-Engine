@@ -114,6 +114,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Number of ticks per exported story chapter (default: 10)",
     )
     p.add_argument(
+        "--until-death",
+        action="store_true",
+        help="Run until the last sim dies naturally (ignores --ticks)",
+    )
+    p.add_argument(
+        "--ticks-per-year",
+        type=int,
+        default=None,
+        help="Override ticks per in-game year (default: 50 from config)",
+    )
+    p.add_argument(
         "--analytics",
         action="store_true",
         help="Track metrics and generate post-run analytics report (charts + summary JSON)",
@@ -308,17 +319,45 @@ def main() -> None:
         _tracker = SimTracker(engine)
         print(f"[INFO] Analytics tracking ON → {args.analytics_dir}/\n")
 
-    print(f"\n[INFO] Starting simulation — {args.ticks} ticks\n")
+    # Ticks-per-year override
+    if args.ticks_per_year:
+        import config as _cfg
+        _cfg.TICKS_PER_YEAR = args.ticks_per_year
+        print(f"[INFO] Ticks per year: {args.ticks_per_year}\n")
+
+    # ── Run loop ──────────────────────────────────────────────────────────────
+    if args.until_death:
+        oldest_age = max(s.profile.get("age", 25) for s in sims)
+        from config import TICKS_PER_YEAR as TPY
+        from core.life_stage import DEATH_AGE_MAX
+        est_ticks = (DEATH_AGE_MAX - oldest_age) * TPY
+        print(
+            f"\n[INFO] Running until last sim dies  "
+            f"(~{est_ticks:,} ticks estimated for oldest sim)\n"
+        )
+    else:
+        print(f"\n[INFO] Starting simulation — {args.ticks} ticks\n")
+
+    def _should_continue(tick_num: int) -> bool:
+        if args.until_death:
+            return not engine.all_sims_dead
+        return tick_num < args.ticks
+
     try:
-        for _ in range(args.ticks):
+        tick_num = 0
+        while _should_continue(tick_num):
             print_tick_header(engine)
             engine.run_tick()
             print_active_sims(engine)
             if _tracker:
                 _tracker.snapshot(engine.tick_count)
+            tick_num += 1
             time.sleep(args.delay)
     except KeyboardInterrupt:
         print("\n[Interrupted by user]")
+
+    if args.until_death and engine.all_sims_dead:
+        print("\n[INFO] All sims have died. Simulation complete.")
 
     # Drain pending LLM calls before summary
     if engine._pending:
