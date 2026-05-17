@@ -730,6 +730,312 @@ def _family_feud(primary_id: str, secondary_ids: list[str], engine: "SimEngine",
 
 # ── Gossip / rumour templates ──────────────────────────────────────────────────
 
+# ── Aging arc templates ────────────────────────────────────────────────────────
+
+def _life_stage_transition(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    new_stage = extra.get("new_stage", "adult")
+    if new_stage == "teen":
+        c.moodlets.append((primary_id, "energised"))
+        c.emotions.append((primary_id, "anticipating", 0.7, 10))
+        c.wants.append((primary_id, "discover who I am and my place in the world"))
+        c.interactions_unlocked.append((primary_id, "teen rebellion"))
+    elif new_stage == "adult":
+        c.moodlets.append((primary_id, "proud"))
+        c.emotions.append((primary_id, "optimism", 0.7, 12))
+        c.reputation_deltas.append((primary_id, 5.0))
+        c.wants.append((primary_id, "establish myself in my career"))
+    elif new_stage == "elder":
+        c.moodlets.append((primary_id, "grateful"))
+        c.emotions.append((primary_id, "sentimental", 0.6, 15))
+        c.wants.append((primary_id, "leave a meaningful legacy"))
+        c.interactions_unlocked.append((primary_id, "share life wisdom"))
+        c.interactions_unlocked.append((primary_id, "tell stories from the past"))
+    for fid in _close_friends(primary_id, engine, threshold=40):
+        c.interactions_unlocked.append((fid, "celebrate life milestone"))
+        c.emotions.append((fid, "joy", 0.3, 5))
+    return c
+
+
+def _midlife_crisis(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    c.moodlets.append((primary_id, "stressed"))
+    c.emotions.append((primary_id, "nervousness", 0.7, 15))
+    c.emotions.append((primary_id, "disappointment", 0.5, 10))
+    c.reputation_deltas.append((primary_id, -3.0))
+    c.wants.append((primary_id, "recapture lost youth and adventure"))
+    c.wants.append((primary_id, "make a dramatic life change"))
+    # Erratic behaviour — may initiate flirtatious or reckless interactions
+    c.interactions_unlocked.append((primary_id, "flirt recklessly"))
+    c.interactions_unlocked.append((primary_id, "announce dramatic life change"))
+    for hid in _all_household_ids(primary_id, engine):
+        c.emotions.append((hid, "nervousness", 0.4, 6))
+    return c
+
+
+def _elder_decline(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    c.moodlets.append((primary_id, "fighting_illness"))
+    c.emotions.append((primary_id, "sentimental", 0.6, 10))
+    c.emotions.append((primary_id, "discomfort",  0.4,  8))
+    c.wants.append((primary_id, "spend time with loved ones"))
+    c.wants.append((primary_id, "put affairs in order"))
+    c.interactions_unlocked.append((primary_id, "share life wisdom"))
+    c.interactions_unlocked.append((primary_id, "reminisce about the past"))
+    for fid in _close_friends(primary_id, engine, threshold=50):
+        c.emotions.append((fid, "nervousness", 0.4, 6))
+        c.interactions_unlocked.append((fid, "offer elder care support"))
+    return c
+
+
+def _death_preparation(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    c.moodlets.append((primary_id, "grateful"))
+    c.emotions.append((primary_id, "sentimental",   0.8, 20))
+    c.emotions.append((primary_id, "fear",          0.5, 10))
+    c.wants.append((primary_id, "make peace with everyone I care about"))
+    c.wants.append((primary_id, "pass on something meaningful"))
+    c.reputation_deltas.append((primary_id, 5.0))  # community respect for elders
+    for fid in _close_friends(primary_id, engine, threshold=40):
+        c.interactions_unlocked.append((fid, "offer final comfort"))
+        c.interactions_unlocked.append((fid, "say goodbye"))
+        c.emotions.append((fid, "sentimental", 0.5, 8))
+    return c
+
+
+# ── Career depth templates ─────────────────────────────────────────────────────
+
+def _demotion(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    c.moodlets.append((primary_id, "stressed"))
+    c.moodlets.append((primary_id, "embarrassed"))
+    c.emotions.append((primary_id, "disappointment", 0.8, 12))
+    c.emotions.append((primary_id, "embarrassment",  0.6,  8))
+    c.reputation_deltas.append((primary_id, -6.0))
+    sim = engine._sim_lookup.get(primary_id)
+    if sim:
+        sim.career_performance = max(0, sim.career_performance - 15)
+    c.wants.append((primary_id, "prove myself and regain my former standing"))
+    c.fears.append((primary_id, "fear of failure"))
+    for hid in _all_household_ids(primary_id, engine):
+        c.emotions.append((hid, "nervousness", 0.3, 4))
+    return c
+
+
+def _fired(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    c.moodlets.append((primary_id, "stressed"))
+    c.moodlets.append((primary_id, "broke"))
+    c.emotions.append((primary_id, "anger",         0.7, 12))
+    c.emotions.append((primary_id, "disappointment", 0.8, 15))
+    c.emotions.append((primary_id, "nervousness",    0.7, 10))
+    c.reputation_deltas.append((primary_id, -10.0))
+    sim = engine._sim_lookup.get(primary_id)
+    if sim:
+        sim.career_performance = 20.0
+    c.wants.append((primary_id, "find a new job urgently"))
+    c.wants.append((primary_id, "figure out what went wrong"))
+    c.fears.append((primary_id, "fear of poverty"))
+    c.interactions_unlocked.append((primary_id, "vent about being fired"))
+    for fid in _close_friends(primary_id, engine, threshold=45):
+        c.interactions_unlocked.append((fid, "offer job hunting advice"))
+        c.interactions_unlocked.append((fid, "offer financial support"))
+    return c
+
+
+def _workplace_romance(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    colleague_id = secondary_ids[0] if secondary_ids else ""
+    c.moodlets.append((primary_id, "flirty"))
+    c.emotions.append((primary_id, "excitement", 0.6, 10))
+    if colleague_id:
+        c.relationship_deltas.append((primary_id, colleague_id, 5.0, 12.0))
+        c.moodlets.append((colleague_id, "flirty"))
+        c.emotions.append((colleague_id, "anticipating", 0.5, 8))
+        c.interactions_unlocked.append((primary_id, "flirt with colleague"))
+        c.interactions_unlocked.append((colleague_id, "flirt with colleague"))
+    c.reputation_deltas.append((primary_id, -2.0))  # office gossip risk
+    return c
+
+
+def _workplace_rivalry(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    rival_id = secondary_ids[0] if secondary_ids else ""
+    c.moodlets.append((primary_id, "stressed"))
+    c.emotions.append((primary_id, "anger", 0.6, 10))
+    if rival_id:
+        c.relationship_deltas.append((primary_id, rival_id, -12.0, 0.0))
+        c.sentiments.append((primary_id, rival_id, "rivalry_formed"))
+        c.moodlets.append((rival_id, "stressed"))
+        c.interactions_unlocked.append((primary_id, "rivalry_escalation"))
+        c.interactions_unlocked.append((rival_id,   "rivalry_escalation"))
+    c.wants.append((primary_id, "outperform my workplace rival"))
+    return c
+
+
+def _career_change(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    c.moodlets.append((primary_id, "energised"))
+    c.emotions.append((primary_id, "anticipating", 0.7, 12))
+    c.emotions.append((primary_id, "nervousness",  0.4,  6))
+    sim = engine._sim_lookup.get(primary_id)
+    if sim:
+        sim.career_performance = 40.0  # fresh start at middle level
+    c.wants.append((primary_id, "prove myself in my new career path"))
+    c.interactions_unlocked.append((primary_id, "share exciting career news"))
+    for fid in _close_friends(primary_id, engine, threshold=40):
+        c.interactions_unlocked.append((fid, "encourage career change"))
+    return c
+
+
+# ── Education templates ────────────────────────────────────────────────────────
+
+def _school_performance(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    grade = extra.get("grade", "good")
+    if grade == "excellent":
+        c.moodlets.append((primary_id, "proud"))
+        c.emotions.append((primary_id, "pride", 0.7, 8))
+        c.reputation_deltas.append((primary_id, 3.0))
+        c.celebrity_deltas.append((primary_id, 1.0))
+    elif grade == "poor":
+        c.moodlets.append((primary_id, "stressed"))
+        c.emotions.append((primary_id, "disappointment", 0.6, 8))
+        c.emotions.append((primary_id, "nervousness",    0.5, 6))
+        c.wants.append((primary_id, "improve my grades"))
+    for parent_id in [p for p in engine.sims if primary_id in p.profile.get("parent_ids", [])
+                       or primary_id in getattr(p, "coworker_ids", [])]:
+        pass  # parents notified via household visibility
+    return c
+
+
+def _homework_failure(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    c.moodlets.append((primary_id, "stressed"))
+    c.emotions.append((primary_id, "nervousness",    0.5, 6))
+    c.emotions.append((primary_id, "disappointment", 0.4, 5))
+    c.wants.append((primary_id, "ask for help with studying"))
+    c.interactions_unlocked.append((primary_id, "ask for tutoring help"))
+    return c
+
+
+def _exam_success(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    c.moodlets.append((primary_id, "on_a_roll"))
+    c.moodlets.append((primary_id, "proud"))
+    c.emotions.append((primary_id, "pride",     0.8, 10))
+    c.emotions.append((primary_id, "excitement", 0.6, 8))
+    c.reputation_deltas.append((primary_id, 4.0))
+    c.celebrity_deltas.append((primary_id, 1.0))
+    sim = engine._sim_lookup.get(primary_id)
+    if sim:
+        sim.skills.gain_xp("logic", 1.5)
+    c.interactions_unlocked.append((primary_id, "celebrate exam success"))
+    return c
+
+
+def _scholarship(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    amount = extra.get("amount", 1000.0)
+    sim = engine._sim_lookup.get(primary_id)
+    if sim:
+        sim.simoleons += amount
+    c.moodlets.append((primary_id, "proud"))
+    c.moodlets.append((primary_id, "on_a_roll"))
+    c.emotions.append((primary_id, "pride",      1.0, 15))
+    c.emotions.append((primary_id, "excitement", 0.8, 10))
+    c.reputation_deltas.append((primary_id, 8.0))
+    c.celebrity_deltas.append((primary_id, 3.0))
+    c.interactions_unlocked.append((primary_id, "share scholarship news"))
+    for fid in _close_friends(primary_id, engine, threshold=40):
+        c.interactions_unlocked.append((fid, "congratulate on scholarship"))
+        c.emotions.append((fid, "joy", 0.4, 5))
+    return c
+
+
+def _graduation(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    c.moodlets.append((primary_id, "proud"))
+    c.moodlets.append((primary_id, "on_a_roll"))
+    c.emotions.append((primary_id, "pride",      1.0, 20))
+    c.emotions.append((primary_id, "excitement", 0.8, 15))
+    c.reputation_deltas.append((primary_id, 10.0))
+    c.celebrity_deltas.append((primary_id, 4.0))
+    c.wants.append((primary_id, "start my career with a strong foundation"))
+    c.interactions_unlocked.append((primary_id, "share graduation news"))
+    for fid in _close_friends(primary_id, engine, threshold=35):
+        c.interactions_unlocked.append((fid, "celebrate graduation"))
+        c.emotions.append((fid, "joy", 0.5, 6))
+    return c
+
+
+# ── Health depth templates ─────────────────────────────────────────────────────
+
+def _chronic_stress(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    c.moodlets.append((primary_id, "stressed"))
+    c.moodlets.append((primary_id, "fighting_illness"))
+    c.emotions.append((primary_id, "nervousness", 0.7, 15))
+    c.emotions.append((primary_id, "discomfort",  0.5, 10))
+    sim = engine._sim_lookup.get(primary_id)
+    if sim:
+        sim.needs.energy = max(0, sim.needs.energy - 10)
+        sim.needs.fun    = max(0, sim.needs.fun    - 8)
+    c.wants.append((primary_id, "find a way to reduce stress"))
+    c.wants.append((primary_id, "take a break and recover"))
+    c.fears.append((primary_id, "fear of burnout"))
+    c.interactions_unlocked.append((primary_id, "reach out to share feelings and seek comfort"))
+    for fid in _close_friends(primary_id, engine, threshold=50):
+        c.interactions_unlocked.append((fid, "check in on stressed friend"))
+    return c
+
+
+def _injury(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    severity = extra.get("severity", "minor")
+    c.moodlets.append((primary_id, "fighting_illness"))
+    c.emotions.append((primary_id, "discomfort", 0.7, 10))
+    c.emotions.append((primary_id, "fear",       0.4,  6))
+    sim = engine._sim_lookup.get(primary_id)
+    if sim:
+        penalty = {"minor": 15, "moderate": 30, "severe": 50}.get(severity, 15)
+        sim.needs.energy  = max(0, sim.needs.energy  - penalty)
+        sim.needs.comfort = max(0, sim.needs.comfort - penalty * 0.7)
+    c.wants.append((primary_id, "rest and recover from the injury"))
+    for fid in _close_friends(primary_id, engine, threshold=40):
+        c.interactions_unlocked.append((fid, "check in on injured friend"))
+        c.emotions.append((fid, "nervousness", 0.3, 4))
+    return c
+
+
+def _hospitalization(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
+    c = EventConsequences()
+    c.moodlets.append((primary_id, "fighting_illness"))
+    c.moodlets.append((primary_id, "stressed"))
+    c.emotions.append((primary_id, "fear",        0.8, 15))
+    c.emotions.append((primary_id, "discomfort",  0.7, 12))
+    sim = engine._sim_lookup.get(primary_id)
+    if sim:
+        sim.health_status = "sick"
+        sim.illness_severity = "severe"
+        sim.illness_ticks_left = 10
+        sim.needs.energy  = max(0, sim.needs.energy  - 40)
+        sim.needs.comfort = max(0, sim.needs.comfort - 30)
+    c.reputation_deltas.append((primary_id, -2.0))  # vulnerability becomes public
+    c.wants.append((primary_id, "recover and return to normal life"))
+    c.fears.append((primary_id, "fear of death"))
+    for fid in _close_friends(primary_id, engine, threshold=40):
+        c.moodlets.append((fid, "uncomfortable"))
+        c.emotions.append((fid, "nervousness", 0.6, 10))
+        c.emotions.append((fid, "fear",        0.4,  8))
+        c.interactions_unlocked.append((fid, "hospital visit"))
+        c.interactions_unlocked.append((fid, "check on hospitalized friend"))
+    for hid in _all_household_ids(primary_id, engine):
+        c.emotions.append((hid, "nervousness", 0.7, 12))
+        c.emotions.append((hid, "fear",        0.5,  8))
+    return c
+
+
 def _rumour_created(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
     c = EventConsequences()
     target_id = secondary_ids[0] if secondary_ids else ""
@@ -844,6 +1150,35 @@ _TEMPLATES: dict[str, object] = {
     EventType.PARENTAL_SUPPORT:     _parental_support,
     EventType.INHERITANCE_RECEIVED: _inheritance_received,
     EventType.FAMILY_FEUD:          _family_feud,
+    # Aging arc
+    EventType.LIFE_STAGE_TRANSITION: _life_stage_transition,
+    EventType.MIDLIFE_CRISIS:        _midlife_crisis,
+    EventType.ELDER_DECLINE:         _elder_decline,
+    EventType.DEATH_PREPARATION:     _death_preparation,
+    # Career depth
+    EventType.DEMOTION:              _demotion,
+    EventType.FIRED:                 _fired,
+    EventType.WORKPLACE_ROMANCE:     _workplace_romance,
+    EventType.WORKPLACE_RIVALRY:     _workplace_rivalry,
+    EventType.CAREER_CHANGE:         _career_change,
+    # Education
+    EventType.SCHOOL_PERFORMANCE:   _school_performance,
+    EventType.HOMEWORK_FAILURE:      _homework_failure,
+    EventType.EXAM_SUCCESS:          _exam_success,
+    EventType.SCHOLARSHIP:           _scholarship,
+    EventType.GRADUATION:            _graduation,
+    # Health depth
+    EventType.CHRONIC_STRESS:        _chronic_stress,
+    EventType.INJURY:                _injury,
+    EventType.HOSPITALIZATION:       _hospitalization,
+    # Misc / passthrough
+    EventType.RECOVERY:         lambda p, s, e, x: EventConsequences(moodlets=[(p, 'energised')], emotions=[(p, 'relief', 0.7, 8)], reputation_deltas=[(p, 2.0)]),
+    EventType.RIVALRY:          lambda p, s, e, x: EventConsequences(moodlets=[(p, 'stressed')], emotions=[(p, 'anger', 0.5, 8)]),
+    EventType.CRAFTED_ITEM:     lambda p, s, e, x: EventConsequences(moodlets=[(p, 'proud')], emotions=[(p, 'pride', 0.5, 5)], celebrity_deltas=[(p, 0.5)]),
+    EventType.ANNIVERSARY:      lambda p, s, e, x: EventConsequences(moodlets=[(p, 'deeply_connected')], emotions=[(p, 'love', 0.7, 10)]),
+    EventType.HOLIDAY:          lambda p, s, e, x: EventConsequences(emotions=[(p, 'joy', 0.6, 8)]),
+    EventType.LLM_SUGGESTED:    _default,
+    EventType.RUMOUR_SPREAD:    lambda p, s, e, x: EventConsequences(celebrity_deltas=[(p, 0.2)]),
     # Gossip / rumour
     EventType.RUMOUR_CREATED:       _rumour_created,
     EventType.RUMOUR_BELIEVED:      _rumour_believed,

@@ -96,6 +96,31 @@ class EventType:
     INHERITANCE_RECEIVED = "inheritance_received"
     FAMILY_FEUD          = "family_feud"
 
+    # ── Aging arc ─────────────────────────────────────────────────────────────
+    LIFE_STAGE_TRANSITION = "life_stage_transition"
+    MIDLIFE_CRISIS        = "midlife_crisis"
+    ELDER_DECLINE         = "elder_decline"
+    DEATH_PREPARATION     = "death_preparation"
+
+    # ── Career depth ──────────────────────────────────────────────────────────
+    DEMOTION              = "demotion"
+    FIRED                 = "fired"
+    WORKPLACE_ROMANCE     = "workplace_romance"
+    WORKPLACE_RIVALRY     = "workplace_rivalry"
+    CAREER_CHANGE         = "career_change"
+
+    # ── Education ─────────────────────────────────────────────────────────────
+    SCHOOL_PERFORMANCE    = "school_performance"
+    HOMEWORK_FAILURE      = "homework_failure"
+    EXAM_SUCCESS          = "exam_success"
+    SCHOLARSHIP           = "scholarship"
+    GRADUATION            = "graduation"
+
+    # ── Health depth ──────────────────────────────────────────────────────────
+    CHRONIC_STRESS        = "chronic_stress"
+    INJURY                = "injury"
+    HOSPITALIZATION       = "hospitalization"
+
     # ── Gossip / rumour ───────────────────────────────────────────────────────
     RUMOUR_CREATED    = "rumour_created"
     RUMOUR_SPREAD     = "rumour_spread"

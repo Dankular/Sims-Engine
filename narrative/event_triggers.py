@@ -62,6 +62,10 @@ class EventTriggerSystem:
         events += _check_romance_arc(engine, tick)
         events += _check_friendship_arc(engine, tick)
         events += _check_family_arc(engine, tick)
+        events += _check_aging_arc(engine, tick)
+        events += _check_career_depth(engine, tick)
+        events += _check_education(engine, tick)
+        events += _check_health_depth(engine, tick)
         events += _check_gossip_rumour(engine, tick)
         events += _check_random_drama(engine, tick)
 
@@ -618,3 +622,251 @@ def _check_random_drama(engine: "SimEngine", tick: int) -> list[LifeEvent]:
         consequences=c, source="trigger:random_drama",
     ))
     return events
+
+
+# ── Aging arc triggers ─────────────────────────────────────────────────────────
+
+_aging_fired: dict[str, set[str]] = {}  # sim_id -> set of fired stage keys
+
+
+def _check_aging_arc(engine, tick):
+    from core.event_record import EventType, Visibility
+    events = []
+    for sim in engine.sims:
+        age = sim.profile.get("age", 25)
+        fired = _aging_fired.setdefault(sim.sim_id, set())
+
+        stage = "child" if age < 13 else "teen" if age < 18 else "adult" if age < 65 else "elder"
+        skey = f"stage:{stage}"
+        if skey not in fired:
+            fired.add(skey)
+            c = build_consequences(EventType.LIFE_STAGE_TRANSITION, sim.sim_id, [], engine,
+                                   extra={"new_stage": stage})
+            events.append(LifeEvent.make(
+                EventType.LIFE_STAGE_TRANSITION, sim.sim_id,
+                f"{sim.name} has entered the {stage} life stage.",
+                tick, visibility=Visibility.HOUSEHOLD,
+                valence=+0.6, intensity=0.7, duration_ticks=20,
+                consequences=c, source="trigger:aging",
+            ))
+
+        if 40 <= age <= 55 and sim.career_performance < 45 and "midlife_crisis" not in fired:
+            if random.random() < 0.08:
+                fired.add("midlife_crisis")
+                c = build_consequences(EventType.MIDLIFE_CRISIS, sim.sim_id, [], engine)
+                events.append(LifeEvent.make(
+                    EventType.MIDLIFE_CRISIS, sim.sim_id,
+                    f"{sim.name} is experiencing a midlife crisis.",
+                    tick, visibility=Visibility.HOUSEHOLD,
+                    valence=-0.4, intensity=0.7, duration_ticks=25,
+                    consequences=c, source="trigger:aging",
+                ))
+
+        if age >= 65 and tick % 20 == 0 and _can_fire(sim.sim_id, "need_based", tick):
+            _record_fire(sim.sim_id, "need_based", tick)
+            c = build_consequences(EventType.ELDER_DECLINE, sim.sim_id, [], engine)
+            events.append(LifeEvent.make(
+                EventType.ELDER_DECLINE, sim.sim_id,
+                f"{sim.name} shows signs of age-related decline.",
+                tick, visibility=Visibility.HOUSEHOLD,
+                valence=-0.3, intensity=0.5, duration_ticks=15,
+                consequences=c, source="trigger:aging",
+            ))
+
+        if age >= 72 and "death_prep" not in fired and random.random() < 0.04:
+            fired.add("death_prep")
+            c = build_consequences(EventType.DEATH_PREPARATION, sim.sim_id, [], engine)
+            events.append(LifeEvent.make(
+                EventType.DEATH_PREPARATION, sim.sim_id,
+                f"{sim.name} begins preparing for the end of life.",
+                tick, visibility=Visibility.HOUSEHOLD,
+                valence=-0.2, intensity=0.6, duration_ticks=40,
+                consequences=c, source="trigger:aging",
+            ))
+
+    return events
+
+
+# ── Career depth triggers ──────────────────────────────────────────────────────
+
+def _check_career_depth(engine, tick):
+    from core.event_record import EventType, Visibility
+    events = []
+    for sim in engine.sims:
+        if not _can_fire(sim.sim_id, "need_based", tick):
+            continue
+        cp = sim.career_performance
+
+        if cp < 30 and cp > 10 and random.random() < 0.08:
+            _record_fire(sim.sim_id, "need_based", tick)
+            c = build_consequences(EventType.DEMOTION, sim.sim_id, [], engine)
+            events.append(LifeEvent.make(
+                EventType.DEMOTION, sim.sim_id,
+                f"{sim.name} has been demoted due to poor performance.",
+                tick, visibility=Visibility.HOUSEHOLD,
+                valence=-0.7, intensity=0.75, duration_ticks=20,
+                consequences=c, source="trigger:career",
+            ))
+        elif cp < 10 and random.random() < 0.12:
+            _record_fire(sim.sim_id, "need_based", tick)
+            c = build_consequences(EventType.FIRED, sim.sim_id, [], engine)
+            events.append(LifeEvent.make(
+                EventType.FIRED, sim.sim_id,
+                f"{sim.name} has been fired from their job.",
+                tick, visibility=Visibility.PUBLIC,
+                valence=-0.9, intensity=0.9, duration_ticks=25,
+                consequences=c, source="trigger:career",
+            ))
+
+        for cw_id in sim.coworker_ids:
+            cw = engine._sim_lookup.get(cw_id)
+            if cw is None:
+                continue
+            rel = engine.relationships.get(sim.sim_id, cw_id)
+            pk = f"wr_{min(sim.sim_id, cw_id)}_{max(sim.sim_id, cw_id)}"
+            rk = f"wri_{min(sim.sim_id, cw_id)}_{max(sim.sim_id, cw_id)}"
+            f_set = _aging_fired.setdefault(sim.sim_id, set())
+
+            if rel.romance >= 30 and rel.friendship >= 40 and pk not in f_set and random.random() < 0.15:
+                f_set.add(pk)
+                c = build_consequences(EventType.WORKPLACE_ROMANCE, sim.sim_id, [cw_id], engine)
+                events.append(LifeEvent.make(
+                    EventType.WORKPLACE_ROMANCE, sim.sim_id,
+                    f"{sim.name} and {cw.name} have a workplace romance brewing.",
+                    tick, secondary_sim_ids=[cw_id],
+                    visibility=Visibility.CLUB,
+                    valence=+0.6, intensity=0.6, duration_ticks=20,
+                    consequences=c, source="trigger:career",
+                ))
+            if rel.friendship < -20 and rk not in f_set and random.random() < 0.12:
+                f_set.add(rk)
+                c = build_consequences(EventType.WORKPLACE_RIVALRY, sim.sim_id, [cw_id], engine)
+                events.append(LifeEvent.make(
+                    EventType.WORKPLACE_RIVALRY, sim.sim_id,
+                    f"{sim.name} and {cw.name} have become workplace rivals.",
+                    tick, secondary_sim_ids=[cw_id],
+                    visibility=Visibility.CLUB,
+                    valence=-0.5, intensity=0.6, duration_ticks=25,
+                    consequences=c, source="trigger:career",
+                ))
+
+    return events
+
+
+# ── Education triggers ─────────────────────────────────────────────────────────
+
+_edu_cooldown: dict[str, int] = {}
+
+
+def _check_education(engine, tick):
+    from core.event_record import EventType, Visibility
+    events = []
+    children = [s for s in engine.sims if s.is_child_of and s.profile.get("age", 25) < 18]
+
+    for sim in children:
+        last = _edu_cooldown.get(sim.sim_id, -25)
+        if tick - last < 20:
+            continue
+        logic = sim.skills.levels.get("logic", 0)
+
+        if logic >= 5 and random.random() < 0.10:
+            _edu_cooldown[sim.sim_id] = tick
+            c = build_consequences(EventType.EXAM_SUCCESS, sim.sim_id, [], engine)
+            events.append(LifeEvent.make(
+                EventType.EXAM_SUCCESS, sim.sim_id,
+                f"{sim.name} passed an exam with flying colours.",
+                tick, visibility=Visibility.HOUSEHOLD,
+                valence=+0.7, intensity=0.6, duration_ticks=10,
+                consequences=c, source="trigger:education",
+            ))
+        elif logic < 2 and random.random() < 0.08:
+            _edu_cooldown[sim.sim_id] = tick
+            c = build_consequences(EventType.HOMEWORK_FAILURE, sim.sim_id, [], engine)
+            events.append(LifeEvent.make(
+                EventType.HOMEWORK_FAILURE, sim.sim_id,
+                f"{sim.name} failed to complete their homework.",
+                tick, visibility=Visibility.HOUSEHOLD,
+                valence=-0.4, intensity=0.4, duration_ticks=8,
+                consequences=c, source="trigger:education",
+            ))
+
+        skey = f"scholarship_{sim.sim_id}"
+        if logic >= 8 and skey not in _aging_fired.get(sim.sim_id, set()):
+            _aging_fired.setdefault(sim.sim_id, set()).add(skey)
+            c = build_consequences(EventType.SCHOLARSHIP, sim.sim_id, [], engine,
+                                   extra={"amount": 2000.0})
+            events.append(LifeEvent.make(
+                EventType.SCHOLARSHIP, sim.sim_id,
+                f"{sim.name} has been awarded a scholarship for academic excellence.",
+                tick, visibility=Visibility.PUBLIC,
+                valence=+0.9, intensity=0.85, duration_ticks=20,
+                consequences=c, source="trigger:education",
+            ))
+
+    for sim in engine.sims:
+        gkey = f"grad_{sim.sim_id}"
+        if (sim.profile.get("age", 0) == 18
+                and gkey not in _aging_fired.get(sim.sim_id, set())):
+            _aging_fired.setdefault(sim.sim_id, set()).add(gkey)
+            c = build_consequences(EventType.GRADUATION, sim.sim_id, [], engine)
+            events.append(LifeEvent.make(
+                EventType.GRADUATION, sim.sim_id,
+                f"{sim.name} has graduated and entered adulthood.",
+                tick, visibility=Visibility.CLUB,
+                valence=+0.9, intensity=0.85, duration_ticks=20,
+                consequences=c, source="trigger:education",
+            ))
+
+    return events
+
+
+# ── Health depth triggers ──────────────────────────────────────────────────────
+
+def _check_health_depth(engine, tick):
+    from core.event_record import EventType, Visibility
+    events = []
+    for sim in engine.sims:
+        if getattr(sim, "_sleeping", False):
+            continue
+
+        if (getattr(sim, "_high_perf_low_energy_ticks", 0) >= 8
+                and _can_fire(sim.sim_id, "need_based", tick)):
+            _record_fire(sim.sim_id, "need_based", tick)
+            c = build_consequences(EventType.CHRONIC_STRESS, sim.sim_id, [], engine)
+            events.append(LifeEvent.make(
+                EventType.CHRONIC_STRESS, sim.sim_id,
+                f"{sim.name} is suffering from chronic stress.",
+                tick, visibility=Visibility.HOUSEHOLD,
+                valence=-0.6, intensity=0.7, duration_ticks=15,
+                consequences=c, source="trigger:health",
+            ))
+
+        if random.random() < 0.005 and _can_fire(sim.sim_id, "need_based", tick):
+            _record_fire(sim.sim_id, "need_based", tick)
+            severity = random.choice(["minor", "minor", "moderate", "severe"])
+            c = build_consequences(EventType.INJURY, sim.sim_id, [], engine,
+                                   extra={"severity": severity})
+            events.append(LifeEvent.make(
+                EventType.INJURY, sim.sim_id,
+                f"{sim.name} suffered a {severity} injury.",
+                tick, visibility=Visibility.HOUSEHOLD,
+                valence=-0.5, intensity=0.6, duration_ticks=12,
+                consequences=c, source="trigger:health",
+            ))
+
+        if (getattr(sim, "health_status", "healthy") == "sick"
+                and getattr(sim, "illness_severity", "mild") == "severe"
+                and sim.needs.energy < 15
+                and _can_fire(sim.sim_id, "need_based", tick)):
+            _record_fire(sim.sim_id, "need_based", tick)
+            c = build_consequences(EventType.HOSPITALIZATION, sim.sim_id, [], engine)
+            events.append(LifeEvent.make(
+                EventType.HOSPITALIZATION, sim.sim_id,
+                f"{sim.name} has been hospitalized due to severe illness.",
+                tick, visibility=Visibility.PUBLIC,
+                valence=-0.8, intensity=0.9, duration_ticks=20,
+                consequences=c, source="trigger:health",
+            ))
+
+    return events
+
