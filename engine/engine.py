@@ -39,6 +39,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _to_float(val, default: float = 0.0) -> float:
+    """Coerce an LLM result field to float. Handles 'positive'/'negative' strings."""
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        s = str(val).lower()
+        if "positive" in s: return abs(default) or 3.0
+        if "negative" in s: return -(abs(default) or 3.0)
+        return default
+
+
 class SimEngine:
     def __init__(
         self,
@@ -522,8 +533,8 @@ class SimEngine:
             return
 
         rel = self.relationships.get(sim_a.sim_id, sim_b.sim_id)
-        fd = float(result.get("friendship_delta", 0))
-        rd = float(result.get("romance_delta", 0))
+        fd = _to_float(result.get("friendship_delta", 0))
+        rd = _to_float(result.get("romance_delta", 0))
 
         # System 2: Sentiment-modulated deltas — graded outcomes from reaction text
         try:
@@ -551,12 +562,12 @@ class SimEngine:
 
         rel.apply_deltas(fd, rd)
 
-        valence = float(result.get("valence", 0.5))
+        valence = max(-1.0, min(1.0, _to_float(result.get("valence", 0.5), 0.5)))
 
-        sim_a.needs.restore("social", float(result.get("social_need_restore_a", 0)))
-        sim_a.needs.restore("fun", float(result.get("fun_restore_a", 0)))
-        sim_b.needs.restore("social", float(result.get("social_need_restore_b", 0)))
-        sim_b.needs.restore("fun", float(result.get("fun_restore_b", 0)))
+        sim_a.needs.restore("social", _to_float(result.get("social_need_restore_a", 0)))
+        sim_a.needs.restore("fun",    _to_float(result.get("fun_restore_a", 0)))
+        sim_b.needs.restore("social", _to_float(result.get("social_need_restore_b", 0)))
+        sim_b.needs.restore("fun",    _to_float(result.get("fun_restore_b", 0)))
 
         emo_a = result.get("emotion_a", "")
         emo_b = result.get("emotion_b", "")

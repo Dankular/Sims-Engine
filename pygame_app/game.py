@@ -157,8 +157,8 @@ class Game:
                     self.paused = not self.paused
                 elif k == pygame.K_n and not self._rt:
                     self.engine.run_tick()
-                    self.state = self.engine.get_state()
-                    self._accum = 0.0
+                    # state updated by engine thread automatically
+                    pass
                 elif k in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
                     if self._rt:
                         self._rt.set_speed(self._rt.clock.speed * 2)
@@ -279,7 +279,7 @@ class Game:
             f"[{result.get('event_type','?')}] {name}: {result.get('narrative','')[:60]}",
             C.TEXT_GOLD,
         )
-        self.state = self.engine.get_state()
+        pass  # state snapshot updated by engine thread
 
     def _on_child_born(self, **kw) -> None:
         child = kw["child"]
@@ -291,7 +291,7 @@ class Game:
             C.STAGE_COLOUR.get("child", C.TEXT_BRIGHT),
             sub=[(f"Traits: {', '.join(child.profile['traits'][:3])}", C.TEXT_DIM)],
         )
-        self.state = self.engine.get_state()
+        pass  # state snapshot updated by engine thread
 
     def _on_stage(self, **kw) -> None:
         sim     = kw["sim"]
@@ -313,7 +313,7 @@ class Game:
             C.TEXT_DIM,
             sub=[(f"Aspiration: {sim.profile.get('aspiration','?')}  §{sim.simoleons:.0f}", C.TEXT_GHOST)],
         )
-        self.state = self.engine.get_state()
+        pass  # state snapshot updated by engine thread
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
