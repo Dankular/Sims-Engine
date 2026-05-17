@@ -96,6 +96,29 @@ class EventType:
     INHERITANCE_RECEIVED = "inheritance_received"
     FAMILY_FEUD          = "family_feud"
 
+    # ── World / seasonal ─────────────────────────────────────────────────────
+    HEATWAVE_EVENT       = "heatwave_event"
+    SNOW_DAY             = "snow_day"
+    STORM_EVENT          = "storm_event"
+    HOLIDAY_MOOD_SHIFT   = "holiday_mood_shift"
+    SEASONAL_DEPRESSION  = "seasonal_depression"
+    SEASONAL_BOOST       = "seasonal_boost"
+
+    # ── Community ─────────────────────────────────────────────────────────────
+    FESTIVAL             = "festival"
+    NEIGHBORHOOD_DISPUTE = "neighborhood_dispute"
+    CLUB_MEETING_EVENT   = "club_meeting_event"
+    PUBLIC_SCANDAL       = "public_scandal"
+    LOCAL_CELEBRATION    = "local_celebration"
+
+    # ── Household ─────────────────────────────────────────────────────────────
+    BILLS_CRISIS         = "bills_crisis"
+    MOVING_HOUSE         = "moving_house"
+    EVICTION_RISK        = "eviction_risk"
+    ROOMMATE_CONFLICT    = "roommate_conflict"
+    HOUSEHOLD_MERGE      = "household_merge"
+    HOUSEHOLD_SPLIT      = "household_split"
+
     # ── Aging arc ─────────────────────────────────────────────────────────────
     LIFE_STAGE_TRANSITION = "life_stage_transition"
     MIDLIFE_CRISIS        = "midlife_crisis"

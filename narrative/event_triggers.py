@@ -67,6 +67,9 @@ class EventTriggerSystem:
         events += _check_education(engine, tick)
         events += _check_health_depth(engine, tick)
         events += _check_gossip_rumour(engine, tick)
+        events += _check_world_context(engine, tick)
+        events += _check_community(engine, tick)
+        events += _check_household(engine, tick)
         events += _check_random_drama(engine, tick)
 
         return events
@@ -867,6 +870,227 @@ def _check_health_depth(engine, tick):
                 valence=-0.8, intensity=0.9, duration_ticks=20,
                 consequences=c, source="trigger:health",
             ))
+
+    return events
+
+
+
+# ── World / seasonal triggers ──────────────────────────────────────────────────
+
+_seasonal_fired: dict[str, int] = {}   # event_key → last tick fired
+
+
+def _check_world_context(engine, tick):
+    from core.event_record import EventType, Visibility
+    events = []
+
+    weather_name = engine.weather.current.name
+    w_key = f"weather_{weather_name}"
+    last  = _seasonal_fired.get(w_key, -40)
+    if tick - last >= 30:
+        _seasonal_fired[w_key] = tick
+
+        if weather_name == "heatwave":
+            c = build_consequences(EventType.HEATWAVE_EVENT, "", [], engine)
+            events.append(LifeEvent.make(
+                EventType.HEATWAVE_EVENT, engine.sims[0].sim_id if engine.sims else "",
+                "A heatwave hits — everyone is sweltering.",
+                tick, visibility=Visibility.PUBLIC,
+                valence=-0.4, intensity=0.6, duration_ticks=8,
+                consequences=c, source="trigger:weather",
+            ))
+
+        elif weather_name == "snowy":
+            c = build_consequences(EventType.SNOW_DAY, "", [], engine)
+            events.append(LifeEvent.make(
+                EventType.SNOW_DAY, engine.sims[0].sim_id if engine.sims else "",
+                "Snow blankets the neighbourhood — a spontaneous snow day.",
+                tick, visibility=Visibility.PUBLIC,
+                valence=+0.5, intensity=0.6, duration_ticks=8,
+                consequences=c, source="trigger:weather",
+            ))
+
+        elif weather_name == "stormy":
+            c = build_consequences(EventType.STORM_EVENT, "", [], engine)
+            events.append(LifeEvent.make(
+                EventType.STORM_EVENT, engine.sims[0].sim_id if engine.sims else "",
+                "A violent storm sweeps through — everyone hunkers down.",
+                tick, visibility=Visibility.PUBLIC,
+                valence=-0.3, intensity=0.5, duration_ticks=6,
+                consequences=c, source="trigger:weather",
+            ))
+
+    # Seasonal depression check: cloudy/foggy for extended period
+    for sim in engine.sims:
+        if weather_name in ("cloudy", "foggy", "rainy"):
+            if (tick % 25 == 0
+                    and sim.ocean.get("neuroticism", 0.5) > 0.6
+                    and _can_fire(sim.sim_id, "need_based", tick)):
+                _record_fire(sim.sim_id, "need_based", tick)
+                c = build_consequences(EventType.SEASONAL_DEPRESSION, sim.sim_id, [], engine)
+                events.append(LifeEvent.make(
+                    EventType.SEASONAL_DEPRESSION, sim.sim_id,
+                    f"{sim.name} feels the weight of the grey season.",
+                    tick, visibility=Visibility.PRIVATE,
+                    valence=-0.5, intensity=0.6, duration_ticks=10,
+                    consequences=c, source="trigger:seasonal",
+                ))
+
+        # Seasonal boost: sunny + high openness
+        elif weather_name == "sunny":
+            if (tick % 20 == 0
+                    and sim.ocean.get("openness", 0.5) > 0.6
+                    and _can_fire(sim.sim_id, "need_based", tick)):
+                _record_fire(sim.sim_id, "need_based", tick)
+                c = build_consequences(EventType.SEASONAL_BOOST, sim.sim_id, [], engine)
+                events.append(LifeEvent.make(
+                    EventType.SEASONAL_BOOST, sim.sim_id,
+                    f"{sim.name} feels energised by the beautiful weather.",
+                    tick, visibility=Visibility.PRIVATE,
+                    valence=+0.5, intensity=0.4, duration_ticks=8,
+                    consequences=c, source="trigger:seasonal",
+                ))
+
+    return events
+
+
+# ── Community triggers ─────────────────────────────────────────────────────────
+
+_community_cooldowns: dict[str, int] = {}
+
+
+def _check_community(engine, tick):
+    from core.event_record import EventType, Visibility
+    events = []
+
+    # Festival: every 30 ticks in sunny weather or holiday
+    fest_key = "festival"
+    if (tick - _community_cooldowns.get(fest_key, -40) >= 40
+            and engine.weather.current.name == "sunny"
+            and random.random() < 0.10):
+        _community_cooldowns[fest_key] = tick
+        primary = engine.sims[0].sim_id if engine.sims else ""
+        c = build_consequences(EventType.FESTIVAL, primary, [], engine)
+        events.append(LifeEvent.make(
+            EventType.FESTIVAL, primary,
+            "A neighbourhood festival breaks out — everyone is invited!",
+            tick, visibility=Visibility.PUBLIC,
+            valence=+0.8, intensity=0.8, duration_ticks=10,
+            consequences=c, source="trigger:community",
+        ))
+
+    # Local celebration: random positive community event
+    celeb_key = "local_celeb"
+    if (tick - _community_cooldowns.get(celeb_key, -30) >= 35
+            and random.random() < 0.06):
+        _community_cooldowns[celeb_key] = tick
+        primary = engine.sims[0].sim_id if engine.sims else ""
+        c = build_consequences(EventType.LOCAL_CELEBRATION, primary, [], engine)
+        events.append(LifeEvent.make(
+            EventType.LOCAL_CELEBRATION, primary,
+            "The community gathers to celebrate a local milestone.",
+            tick, visibility=Visibility.PUBLIC,
+            valence=+0.7, intensity=0.6, duration_ticks=8,
+            consequences=c, source="trigger:community",
+        ))
+
+    # Neighbourhood dispute: two sims with enemy-level relationship + public
+    dispute_key = "nd"
+    if tick - _community_cooldowns.get(dispute_key, -25) >= 30:
+        for sim in engine.sims:
+            for other in engine.sims:
+                if other.sim_id <= sim.sim_id:
+                    continue
+                rel = engine.relationships.get(sim.sim_id, other.sim_id)
+                if rel.friendship <= -50 and random.random() < 0.08:
+                    _community_cooldowns[dispute_key] = tick
+                    c = build_consequences(EventType.NEIGHBORHOOD_DISPUTE,
+                                           sim.sim_id, [other.sim_id], engine)
+                    events.append(LifeEvent.make(
+                        EventType.NEIGHBORHOOD_DISPUTE, sim.sim_id,
+                        f"{sim.name} and {other.name} have a very public neighbourhood dispute.",
+                        tick, secondary_sim_ids=[other.sim_id],
+                        visibility=Visibility.PUBLIC,
+                        valence=-0.5, intensity=0.65, duration_ticks=20,
+                        consequences=c, source="trigger:community",
+                    ))
+                    break
+            else:
+                continue
+            break
+
+    return events
+
+
+# ── Household triggers ─────────────────────────────────────────────────────────
+
+_household_cooldowns: dict[str, int] = {}
+
+
+def _check_household(engine, tick):
+    from core.event_record import EventType, Visibility
+    events = []
+
+    for hh in engine.households:
+        members = [engine._sim_lookup[mid] for mid in hh.member_ids if mid in engine._sim_lookup]
+        if not members:
+            continue
+
+        hh_key = f"hh_{hh.id}"
+
+        # Bills crisis: household funds critically low
+        if (hh.funds < 50
+                and tick - _household_cooldowns.get(hh_key + "_bills", -20) >= 20
+                and random.random() < 0.25):
+            _household_cooldowns[hh_key + "_bills"] = tick
+            primary = members[0].sim_id
+            c = build_consequences(EventType.BILLS_CRISIS, primary,
+                                   [m.sim_id for m in members[1:]], engine)
+            events.append(LifeEvent.make(
+                EventType.BILLS_CRISIS, primary,
+                f"The {hh.name} household can't pay the bills — financial crisis.",
+                tick, secondary_sim_ids=[m.sim_id for m in members[1:]],
+                visibility=Visibility.HOUSEHOLD,
+                valence=-0.7, intensity=0.8, duration_ticks=15,
+                consequences=c, source="trigger:household",
+            ))
+
+        # Eviction risk: funds negative for extended period
+        if (hh.funds < 0
+                and tick - _household_cooldowns.get(hh_key + "_evict", -30) >= 30):
+            _household_cooldowns[hh_key + "_evict"] = tick
+            primary = members[0].sim_id
+            c = build_consequences(EventType.EVICTION_RISK, primary,
+                                   [m.sim_id for m in members[1:]], engine)
+            events.append(LifeEvent.make(
+                EventType.EVICTION_RISK, primary,
+                f"The {hh.name} household faces eviction — funds exhausted.",
+                tick, secondary_sim_ids=[m.sim_id for m in members[1:]],
+                visibility=Visibility.HOUSEHOLD,
+                valence=-0.9, intensity=0.9, duration_ticks=20,
+                consequences=c, source="trigger:household",
+            ))
+
+        # Roommate conflict: two housemates at very negative friendship
+        if len(members) >= 2:
+            for i, ma in enumerate(members):
+                for mb in members[i+1:]:
+                    rel = engine.relationships.get(ma.sim_id, mb.sim_id)
+                    rk = f"rmc_{min(ma.sim_id,mb.sim_id)}_{max(ma.sim_id,mb.sim_id)}"
+                    if (rel.friendship < -30
+                            and tick - _household_cooldowns.get(rk, -25) >= 25
+                            and random.random() < 0.12):
+                        _household_cooldowns[rk] = tick
+                        c = build_consequences(EventType.ROOMMATE_CONFLICT,
+                                               ma.sim_id, [mb.sim_id], engine)
+                        events.append(LifeEvent.make(
+                            EventType.ROOMMATE_CONFLICT, ma.sim_id,
+                            f"{ma.name} and {mb.name} have a serious roommate conflict.",
+                            tick, secondary_sim_ids=[mb.sim_id],
+                            visibility=Visibility.HOUSEHOLD,
+                            valence=-0.6, intensity=0.7, duration_ticks=15,
+                            consequences=c, source="trigger:household",
+                        ))
 
     return events
 

@@ -1,4 +1,4 @@
-"""
+﻿"""
 narrative/event_templates.py — EventConsequences templates for each life event type.
 
 Each function takes the involved sim IDs and returns a fully-specified
@@ -1103,6 +1103,222 @@ def _default(primary_id: str, secondary_ids: list[str], engine: "SimEngine", ext
 
 # ── Dispatch table ─────────────────────────────────────────────────────────────
 
+
+
+# ── World / seasonal templates ─────────────────────────────────────────────────
+
+def _heatwave_event(p, s, e, x):
+    c = EventConsequences()
+    for sim in e.sims:
+        c.emotions.append((sim.sim_id, "discomfort",  0.6, 6))
+        c.emotions.append((sim.sim_id, "annoyance",   0.4, 4))
+        c.moodlets.append((sim.sim_id, "too_cold"))  # reuse discomfort moodlet
+    c.reputation_deltas.append((p, 0.0))
+    return c
+
+
+def _snow_day(p, s, e, x):
+    c = EventConsequences()
+    for sim in e.sims:
+        c.emotions.append((sim.sim_id, "excitement", 0.5, 6))
+        c.emotions.append((sim.sim_id, "joy",        0.3, 5))
+        c.interactions_unlocked.append((sim.sim_id, "have a snowball fight"))
+        c.interactions_unlocked.append((sim.sim_id, "build something together in the snow"))
+    return c
+
+
+def _storm_event(p, s, e, x):
+    c = EventConsequences()
+    for sim in e.sims:
+        c.emotions.append((sim.sim_id, "apprehensive", 0.5, 6))
+        c.emotions.append((sim.sim_id, "nervousness",  0.4, 5))
+        c.moodlets.append((sim.sim_id, "uncomfortable"))
+    return c
+
+
+def _holiday_mood_shift(p, s, e, x):
+    from narrative.event_templates import _all_household_ids
+    c = EventConsequences()
+    holiday_name = x.get("holiday_name", "Holiday")
+    for sim in e.sims:
+        c.emotions.append((sim.sim_id, "joy",      0.6, 8))
+        c.emotions.append((sim.sim_id, "grateful", 0.4, 6))
+        c.interactions_unlocked.append((sim.sim_id, f"celebrate {holiday_name}"))
+        c.interactions_unlocked.append((sim.sim_id, "share holiday meal"))
+    return c
+
+
+def _seasonal_depression(p, s, e, x):
+    c = EventConsequences()
+    c.moodlets.append((p, "rainy_day_blues"))
+    c.emotions.append((p, "sadness",     0.6, 12))
+    c.emotions.append((p, "loneliness",  0.4,  8))
+    c.wants.append((p, "find something meaningful to look forward to"))
+    for fid in _close_friends(p, e, threshold=50):
+        c.interactions_unlocked.append((fid, "reach out to share feelings and seek comfort"))
+    return c
+
+
+def _seasonal_boost(p, s, e, x):
+    c = EventConsequences()
+    c.moodlets.append((p, "energised"))
+    c.emotions.append((p, "optimism", 0.6, 10))
+    c.emotions.append((p, "joy",      0.4,  8))
+    c.wants.append((p, "make the most of the season"))
+    return c
+
+
+# ── Community templates ────────────────────────────────────────────────────────
+
+def _festival(p, s, e, x):
+    c = EventConsequences()
+    for sim in e.sims:
+        sim.needs.restore("social", 12.0)
+        sim.needs.restore("fun", 10.0)
+        c.emotions.append((sim.sim_id, "joy",       0.7, 10))
+        c.emotions.append((sim.sim_id, "excitement", 0.5,  8))
+        c.interactions_unlocked.append((sim.sim_id, "celebrate at the festival"))
+        c.interactions_unlocked.append((sim.sim_id, "meet someone new at event"))
+    return c
+
+
+def _neighborhood_dispute(p, s, e, x):
+    c = EventConsequences()
+    other_id = s[0] if s else ""
+    c.moodlets.append((p, "stressed"))
+    c.emotions.append((p, "anger", 0.6, 10))
+    c.reputation_deltas.append((p, -4.0))
+    if other_id:
+        c.relationship_deltas.append((p, other_id, -10.0, -3.0))
+        c.sentiments.append((p, other_id, "held_grudge"))
+        c.moodlets.append((other_id, "stressed"))
+        c.interactions_unlocked.append((p, "attempt to genuinely repair the relationship"))
+    return c
+
+
+def _club_meeting_event(p, s, e, x):
+    c = EventConsequences()
+    club_name = x.get("club_name", "the club")
+    for member_id in s:
+        c.emotions.append((member_id, "joy",      0.4, 6))
+        c.interactions_unlocked.append((member_id, f"club activity at {club_name}"))
+    return c
+
+
+def _public_scandal(p, s, e, x):
+    c = EventConsequences()
+    rep_hit = x.get("rep_hit", -15.0)
+    c.moodlets.append((p, "stressed"))
+    c.moodlets.append((p, "embarrassed"))
+    c.emotions.append((p, "embarrassment", 0.9, 15))
+    c.reputation_deltas.append((p, rep_hit))
+    c.celebrity_deltas.append((p, -6.0))
+    for wid in s:
+        c.sentiments.append((wid, p, "lied_to_me"))
+        c.relationship_deltas.append((wid, p, -8.0, -3.0))
+    c.interactions_blocked.append((p, "flirt"))
+    c.interactions_blocked.append((p, "propose marriage"))
+    c.interactions_unlocked.append((p, "defend your reputation"))
+    return c
+
+
+def _local_celebration(p, s, e, x):
+    c = EventConsequences()
+    for sim in e.sims:
+        sim.needs.restore("social", 8.0)
+        sim.needs.restore("fun",    8.0)
+        c.emotions.append((sim.sim_id, "joy",      0.6, 8))
+        c.emotions.append((sim.sim_id, "grateful", 0.4, 6))
+        c.interactions_unlocked.append((sim.sim_id, "join the celebration"))
+    return c
+
+
+# ── Household templates ────────────────────────────────────────────────────────
+
+def _bills_crisis(p, s, e, x):
+    c = EventConsequences()
+    c.moodlets.append((p, "broke"))
+    c.moodlets.append((p, "stressed"))
+    c.emotions.append((p, "nervousness",    0.8, 12))
+    c.emotions.append((p, "disappointment", 0.6,  8))
+    c.reputation_deltas.append((p, -3.0))
+    c.wants.append((p, "find extra income urgently"))
+    c.fears.append((p, "fear of poverty"))
+    for hid in _all_household_ids(p, e):
+        c.moodlets.append((hid, "stressed"))
+        c.emotions.append((hid, "nervousness", 0.5, 8))
+    c.interactions_unlocked.append((p, "ask someone for financial support"))
+    return c
+
+
+def _moving_house(p, s, e, x):
+    c = EventConsequences()
+    c.moodlets.append((p, "energised"))
+    c.emotions.append((p, "anticipating", 0.7, 10))
+    c.emotions.append((p, "nervousness",  0.4,  6))
+    c.wants.append((p, "settle into the new home"))
+    c.reputation_deltas.append((p, 3.0))
+    c.interactions_unlocked.append((p, "host a housewarming party"))
+    for fid in _close_friends(p, e, threshold=40):
+        c.interactions_unlocked.append((fid, "help with the move"))
+    return c
+
+
+def _eviction_risk(p, s, e, x):
+    c = EventConsequences()
+    c.moodlets.append((p, "stressed"))
+    c.moodlets.append((p, "broke"))
+    c.emotions.append((p, "fear",        0.8, 15))
+    c.emotions.append((p, "nervousness", 0.7, 12))
+    c.reputation_deltas.append((p, -8.0))
+    c.wants.append((p, "find emergency funds to avoid eviction"))
+    c.fears.append((p, "fear of homelessness"))
+    for hid in _all_household_ids(p, e):
+        c.emotions.append((hid, "fear", 0.6, 10))
+    for fid in _close_friends(p, e, threshold=40):
+        c.interactions_unlocked.append((fid, "offer financial support"))
+        c.interactions_unlocked.append((fid, "offer a place to stay"))
+    return c
+
+
+def _roommate_conflict(p, s, e, x):
+    c = EventConsequences()
+    other_id = s[0] if s else ""
+    c.moodlets.append((p, "stressed"))
+    c.emotions.append((p, "anger", 0.6, 10))
+    if other_id:
+        c.relationship_deltas.append((p, other_id, -12.0, -3.0))
+        c.sentiments.append((p, other_id, "held_grudge"))
+        c.moodlets.append((other_id, "stressed"))
+        c.emotions.append((other_id, "anger", 0.5, 8))
+        c.interactions_unlocked.append((p, "attempt to genuinely repair the relationship"))
+        c.interactions_unlocked.append((p, "calmly confront about painful or hurtful behaviour"))
+    return c
+
+
+def _household_merge(p, s, e, x):
+    c = EventConsequences()
+    for sim_id in [p] + s:
+        c.moodlets.append((sim_id, "uncomfortable"))
+        c.emotions.append((sim_id, "anticipating", 0.5, 8))
+    # Adjustment period — all pairs get slight relationship push
+    for i, a_id in enumerate([p] + s):
+        for b_id in ([p] + s)[i+1:]:
+            c.relationship_deltas.append((a_id, b_id, 3.0, 0.0))
+    return c
+
+
+def _household_split(p, s, e, x):
+    c = EventConsequences()
+    c.moodlets.append((p, "uncomfortable"))
+    c.emotions.append((p, "sadness",     0.5, 8))
+    c.emotions.append((p, "anticipating", 0.4, 6))
+    c.wants.append((p, "stay in touch with former housemates"))
+    for hid in s:
+        c.relationship_deltas.append((p, hid, -3.0, -1.0))
+    return c
+
+
 _TEMPLATES: dict[str, object] = {
     # Core life milestones
     EventType.BIRTH:                _birth,
@@ -1171,6 +1387,26 @@ _TEMPLATES: dict[str, object] = {
     EventType.CHRONIC_STRESS:        _chronic_stress,
     EventType.INJURY:                _injury,
     EventType.HOSPITALIZATION:       _hospitalization,
+    # World / seasonal
+    EventType.HEATWAVE_EVENT:       _heatwave_event,
+    EventType.SNOW_DAY:             _snow_day,
+    EventType.STORM_EVENT:          _storm_event,
+    EventType.HOLIDAY_MOOD_SHIFT:   _holiday_mood_shift,
+    EventType.SEASONAL_DEPRESSION:  _seasonal_depression,
+    EventType.SEASONAL_BOOST:       _seasonal_boost,
+    # Community
+    EventType.FESTIVAL:             _festival,
+    EventType.NEIGHBORHOOD_DISPUTE: _neighborhood_dispute,
+    EventType.CLUB_MEETING_EVENT:   _club_meeting_event,
+    EventType.PUBLIC_SCANDAL:       _public_scandal,
+    EventType.LOCAL_CELEBRATION:    _local_celebration,
+    # Household
+    EventType.BILLS_CRISIS:         _bills_crisis,
+    EventType.MOVING_HOUSE:         _moving_house,
+    EventType.EVICTION_RISK:        _eviction_risk,
+    EventType.ROOMMATE_CONFLICT:    _roommate_conflict,
+    EventType.HOUSEHOLD_MERGE:      _household_merge,
+    EventType.HOUSEHOLD_SPLIT:      _household_split,
     # Misc / passthrough
     EventType.RECOVERY:         lambda p, s, e, x: EventConsequences(moodlets=[(p, 'energised')], emotions=[(p, 'relief', 0.7, 8)], reputation_deltas=[(p, 2.0)]),
     EventType.RIVALRY:          lambda p, s, e, x: EventConsequences(moodlets=[(p, 'stressed')], emotions=[(p, 'anger', 0.5, 8)]),
