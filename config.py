@@ -5,11 +5,28 @@ sim_v2/config.py — All constants for the simulation. No mutable state.
 from pathlib import Path
 
 # ── llama-cpp-python / GGUF backend ───────────────────────────────────────────
-GGUF_REPO = "unsloth/Qwen3.5-9B-GGUF"
-GGUF_FILENAME = "Qwen3.5-9B-Q4_K_M.gguf"  # swap UD-Q4_K_XL for higher quality
-GGUF_N_CTX = 8192
-GGUF_GPU_LAYERS = -1  # -1 = all layers on GPU; 0 = CPU-only
-GGUF_N_THREADS = None  # None = auto
+# ACTIVE tier adjudicator — 3-4B is enough; downstream models (GoEmotions,
+# sentiment, AITA) handle emotion/reputation; LLM only needs valid JSON + reaction text.
+#
+# Recommended options (pick one):
+#   Qwen2.5-3B  — ~2 GB Q4,  same Qwen family, best JSON compliance
+#   Phi-4-mini  — ~2.5 GB Q4, stronger reasoning, good for complex dilemmas
+#   Llama-3.2-3B — ~2 GB Q4, widely available
+#
+# Ollama equivalents: qwen2.5:3b | phi4-mini | llama3.2:3b
+GGUF_REPO     = "Qwen/Qwen2.5-3B-Instruct-GGUF"
+GGUF_FILENAME = "Qwen2.5-3B-Instruct-Q4_K_M.gguf"
+# Alternative: Phi-4-mini (stronger reasoning, slightly larger)
+# GGUF_REPO     = "bartowski/Phi-4-mini-instruct-GGUF"
+# GGUF_FILENAME = "Phi-4-mini-instruct-Q4_K_M.gguf"
+GGUF_N_CTX = 4096           # 4 k is plenty for our ~800-token prompts; saves RAM
+GGUF_GPU_LAYERS = -1        # -1 = all layers on GPU; 0 = CPU-only
+GGUF_N_THREADS = None       # None = auto
+
+# Whether to prefix user messages with Qwen3's /no_think directive.
+# Set True only when using Qwen3.x models (suppresses <think> blocks).
+# Qwen2.5 / Phi / Llama models should leave this False.
+GGUF_USE_NO_THINK = False
 
 # ── HuggingFace model/dataset IDs ─────────────────────────────────────────────
 # Small inference models (lazy-loaded, CPU-only, all have hardcoded fallbacks)
@@ -36,9 +53,10 @@ HF_EMOTION_CLASSIFIER_ML = (
 )
 # MBTI inference from text
 HF_MBTI_MODEL = "theta/MBTI-ckiplab-bert"
-# Background LOD smaller LLM
-GGUF_BG_REPO = "unsloth/Ministral-3B-Instruct-2410-GGUF"
-GGUF_BG_FILENAME = "Ministral-3B-Instruct-2410-Q4_K_M.gguf"
+# Background LOD — even lighter; 1.5B is sufficient for the compact bg prompt
+# Ollama equivalent: qwen2.5:1.5b
+GGUF_BG_REPO      = "Qwen/Qwen2.5-1.5B-Instruct-GGUF"
+GGUF_BG_FILENAME  = "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
 HF_OKCUPID_DATASET = "SpiceeChat/OkCupid-59k-Anonymized-Profiles"
 HF_PROSOCIAL_DATASET = "allenai/prosocial-dialog"
 HF_DIALOGUE_DATASET = "agentlans/multi-character-dialogue"
@@ -47,6 +65,21 @@ HF_SOCIAL_IQA_DATASET = "allenai/social_i_qa"
 HF_EMPATHETIC_DATASET = "facebook/empathetic_dialogues"
 HF_EMOTION_DATASET = "dair-ai/emotion"
 HF_CONVAI2_DATASET = "convai-challenge/conv_ai_2"
+
+# ── Emergent mechanics ────────────────────────────────────────────────────────
+# Emotional contagion — friendship threshold before emotion spreads between sims
+CONTAGION_FRIENDSHIP_MIN  = 35     # below this: no contagion
+CONTAGION_MAX_STRENGTH    = 0.30   # max emotion bleed at best-friend level (100)
+CONTAGION_SKIP_EMOTIONS   = {"neutral"}  # emotions that don't propagate
+
+# Reputation gating — how much reputation shifts pair-selection scores
+# Range: rep -100..+100 → adjustment -0.50..+0.25 (avoidance stronger than attraction)
+REPUTATION_SCORE_SCALE    = 200.0  # divisor; keeps adjustment in -0.5..+0.5 range
+REPUTATION_BOOST_CAP      = 0.25   # cap the upward boost (fame ≠ forced interaction)
+
+# Memory bias — how much shared memory valence shifts pair-selection scores
+MEMORY_BIAS_LOOKBACK      = 6      # last N memories considered
+MEMORY_BIAS_WEIGHT        = 0.25   # max contribution to interaction score
 
 # ── Cache / persistence paths ─────────────────────────────────────────────────
 CACHE_DIR = Path(__file__).parent / ".sim_cache"
@@ -203,6 +236,31 @@ DEALBREAKERS_POOL = [
     "laziness",
     "rudeness",
 ]
+
+LIKES_POOL = [
+    "outdoor activities", "intellectual conversations", "cooking together",
+    "live music", "art galleries", "spontaneous adventures", "cosy nights in",
+    "deep philosophical talks", "sports events", "dancing", "hiking",
+    "game nights", "volunteering", "stargazing", "road trips",
+]
+
+DISLIKES_POOL = [
+    "loud parties", "small talk", "confrontation", "routine",
+    "lateness", "arrogance", "indecisiveness", "pessimism",
+    "materialism", "excessive social media use", "being ignored",
+    "passive-aggressiveness", "recklessness", "narrow-mindedness",
+]
+
+# ── Celebrity / Fame ──────────────────────────────────────────────────────────
+CELEBRITY_TIERS = {
+    "none":      (0,   20),
+    "known":     (20,  40),
+    "star":      (40,  70),
+    "celebrity": (70,  90),
+    "icon":      (90, 100),
+}
+CELEBRITY_SCORE_DECAY = 0.2   # per tick when below threshold
+CELEBRITY_INTERACTION_THRESHOLD = 40   # minimum score to unlock fan interactions
 
 ASPIRATIONS = [
     "Fortune",

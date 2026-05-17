@@ -175,6 +175,27 @@ def _build_parser() -> argparse.ArgumentParser:
         default=25,
         help="Max rows printed by --list-voices (default: 25)",
     )
+    # ── Network / NATS ────────────────────────────────────────────────────────
+    p.add_argument(
+        "--nats",
+        metavar="URL",
+        default=None,
+        help="NATS server URL to join the distributed world (e.g. nats://localhost:4222)",
+    )
+    p.add_argument(
+        "--room",
+        default="global",
+        help=(
+            "Room to join on startup: 'global' (default), "
+            "'personal' (local only), or a custom friends room ID"
+        ),
+    )
+    p.add_argument(
+        "--client-id",
+        default=None,
+        metavar="ID",
+        help="Stable client identity string (auto-generated UUID if omitted)",
+    )
     return p
 
 
@@ -400,6 +421,28 @@ def main() -> None:
     engine = SimEngine(sims=sims, llm=llm, datasets=datasets, db=db)
     engine.households = households
     attach(engine)
+
+    # ── NATS distributed network (optional) ──────────────────────────────────
+    if args.nats:
+        import uuid as _uuid
+        from engine.network import NATSNetwork
+        from engine.rooms import GLOBAL_ROOM, personal_room, room_label
+
+        client_id = args.client_id or _uuid.uuid4().hex
+        room_id   = (
+            personal_room(client_id) if args.room == "personal"
+            else (args.room or GLOBAL_ROOM)
+        )
+        print(f"[INFO] Connecting to NATS: {args.nats}")
+        print(f"[INFO]   client-id : {client_id[:16]}…")
+        print(f"[INFO]   room      : {room_label(room_id)}\n")
+        _network = NATSNetwork(
+            url=args.nats,
+            client_id=client_id,
+            owned_sim_ids={s.sim_id for s in sims},
+            starting_room=room_id,
+        )
+        engine.attach_network(_network, room_id)
 
     # Story mode — TTS narration
     if args.story:

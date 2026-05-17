@@ -23,6 +23,7 @@ import asyncio
 import json
 import sys
 import threading
+import time
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -43,6 +44,7 @@ from identity.profile_factory import generate_sim_profile
 from core.sim import Sim
 from datasets.loader import load_all_datasets
 from llm.backend import create_backend
+from llm.timing import store as timing_store, TimedBackend
 from persistence.sqlite import PersistenceLayer
 from world.households import assign_households
 
@@ -69,18 +71,35 @@ def _get_engine() -> SimEngine:
 
 
 def _build_engine(num_sims: int) -> SimEngine:
+    timing_store.start_boot()
+
     datasets = None
     essays = []
     if not _args.no_datasets:
-        datasets = load_all_datasets()
-        essays = datasets.okcupid_essays
+        with timing_store.phase("datasets"):
+            datasets = load_all_datasets()
+            essays = datasets.okcupid_essays
 
-    llm = create_backend(_args.backend)
-    sims = [Sim(generate_sim_profile(okcupid_essays=essays or None)) for _ in range(num_sims)]
-    households = assign_households(sims)
-    db = PersistenceLayer()
-    engine = SimEngine(sims=sims, llm=llm, datasets=datasets, db=db)
-    engine.households = households
+    with timing_store.phase("llm_init"):
+        raw_llm = create_backend(_args.backend)
+    llm_name = f"{_args.backend}/{getattr(raw_llm, '_model', _args.backend)}"
+    llm = TimedBackend(raw_llm, name=llm_name)
+
+    with timing_store.phase("profiles"):
+        sims = [Sim(generate_sim_profile(okcupid_essays=essays or None)) for _ in range(num_sims)]
+
+    with timing_store.phase("households"):
+        households = assign_households(sims)
+
+    with timing_store.phase("persistence"):
+        db = PersistenceLayer()
+
+    with timing_store.phase("engine_init"):
+        engine = SimEngine(sims=sims, llm=llm, datasets=datasets, db=db)
+        engine.households = households
+
+    boot_total = timing_store.finish_boot()
+    timing_store.print_boot()
     return engine
 
 
@@ -91,11 +110,26 @@ def get_state():
     return _get_engine().get_state()
 
 
+@app.get("/timings")
+def get_timings():
+    return timing_store.summary()
+
+
 @app.post("/tick")
 def tick():
+    eng = _get_engine()
+    # Capture LLM call count before the tick so we can detect new calls
+    llm_before = len(list(timing_store._llm))
+    t0 = time.monotonic()
     with _engine_lock:
-        eng = _get_engine()
         eng.run_tick()
+    tick_elapsed = time.monotonic() - t0
+    timing_store.record_tick(eng.tick_count, tick_elapsed)
+    # Surface the most recent LLM call if one fired during this tick
+    llm_calls_this_tick = len(list(timing_store._llm)) - llm_before
+    llm_recent = list(timing_store._llm)[-1] if llm_calls_this_tick > 0 else None
+    llm_elapsed = llm_recent["elapsed_s"] if llm_recent else None
+    timing_store.print_tick(eng.tick_count, tick_elapsed, llm_elapsed)
     return eng.get_state()
 
 
@@ -171,17 +205,33 @@ async def _broadcast(state: dict):
 async def startup():
     global _engine
     _engine = _build_engine(_args.sims)
-    _engine._bus.on("tick_complete", lambda **kw: asyncio.create_task(_broadcast(_engine.get_state())))
+    # Capture the event loop here (startup always runs in the async context).
+    # tick() runs in a thread pool, so asyncio.create_task() would fail there —
+    # use run_coroutine_threadsafe to safely schedule broadcasts from any thread.
+    _loop = asyncio.get_event_loop()
+    _engine._bus.on(
+        "tick_complete",
+        lambda **kw: asyncio.run_coroutine_threadsafe(
+            _broadcast(_engine.get_state()), _loop
+        ),
+    )
     print(f"\n[API] Sims Engine ready — {len(_engine.sims)} sims")
-    print("[API] GET /state  POST /tick  GET /sim/{id}  POST /interact  WS /stream\n")
+    print("[API] GET /state  POST /tick  GET /sim/{id}  POST /interact  WS /stream  GET /timings\n")
 
 
 if __name__ == "__main__":
+    import os as _os
     parser = argparse.ArgumentParser(description="Sims Engine API server")
     parser.add_argument("--sims", type=int, default=3)
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--backend", default="ollama", choices=["ollama", "llama-server", "llama-cpp"])
+    parser.add_argument("--ollama-model", default=None, help="Ollama model name (e.g. qwen2.5:3b)")
+    parser.add_argument("--ollama-url", default=None, help="Ollama API URL")
     parser.add_argument("--no-datasets", action="store_true")
     _args = parser.parse_args()
+    if _args.ollama_model:
+        _os.environ["SIM_V2_OLLAMA_MODEL"] = _args.ollama_model
+    if _args.ollama_url:
+        _os.environ["SIM_V2_OLLAMA_URL"] = _args.ollama_url
     uvicorn.run(app, host=_args.host, port=_args.port, log_level="warning")

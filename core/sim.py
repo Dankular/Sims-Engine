@@ -51,17 +51,17 @@ class Sim:
         self.lod_tier: LODTier = LODTier.ACTIVE
         self.household_id: Optional[str] = None
         # Reputation system (Class 1)
-        self.reputation_score: float = 0.0   # -100..100; YTA events lower it
+        self.reputation_score: float = 0.0  # -100..100; YTA events lower it
         # Social orientation (Class 2) — circumplex theory
         self.social_orientation: str = "Warm-Agreeable"
         # Emotional intelligence reputation (Class 7)
-        self.ei_reputation: float = 0.0      # -50..50
+        self.ei_reputation: float = 0.0  # -50..50
         # Creative reputation (Gap 3)
         self.creative_reputation: float = 0.0  # 0..100
         # Health scare tracking
         self._low_energy_ticks: int = 0
         # Arc systems (core/arcs.py)
-        self.grief_stage: int = -1              # -1 = not grieving
+        self.grief_stage: int = -1  # -1 = not grieving
         self.grief_target: str = ""
         self._grief_tick_count: int = 0
         self._social_drought_ticks: int = 0
@@ -71,13 +71,75 @@ class Sim:
         self.trauma_events: list[str] = []
         self.action_history: dict[str, int] = {}
         # System 4: Goal/intent persistence
-        self._active_goal = None          # Optional[SimGoal] — lazy import avoids circular
+        self._active_goal = None  # Optional[SimGoal] — lazy import avoids circular
         # System 2: Dialogue buffer (working memory)
-        self._dialogue_buffer: list[dict] = []   # last N turns with current partner
-        self._dialogue_partner: str = ""          # sim_id of current conversation partner
+        self._dialogue_buffer: list[dict] = []  # last N turns with current partner
+        self._dialogue_partner: str = ""  # sim_id of current conversation partner
         self._dialogue_last_tick: int = -999
         # System 5: Sleep consolidation
         self._last_consolidation_tick: int = -9999
+        # Extended life systems
+        self.inventory: list[str] = ["snack", "book"]
+        self.properties: list[str] = []
+        self.owned_businesses: list[str] = []
+        self.health_status: str = "healthy"
+        self.illness_ticks_left: int = 0
+        self.temperature_risk: float = 0.0
+        self.is_ghost: bool = False
+        self.occult_type: str = "none"
+        self.perk_points: int = 0
+        self.perks: set[str] = set()
+        self._last_perk_level_total: int = 0
+        self.pending_phone_actions: list[dict] = []
+        self.active_gig: dict | None = None
+        self.active_odd_job: dict | None = None
+        self.odd_job_reputation: float = 0.0
+        self.pending_invitations: list[dict] = []
+        self.hazard_flags: dict[str, float] = {
+            "fire": 0.0,
+            "electrocution": 0.0,
+            "starvation": 0.0,
+        }
+        self._starvation_ticks: int = 0
+        self._near_fire_ticks: int = 0
+        self._drowning_ticks: int = 0
+        self.school_performance: float = 50.0 if profile.get("age", 0) <= 17 else 0.0
+        self.homework_progress: float = 0.0
+        self.scholarship_points: float = 0.0
+        self.university_readiness: float = 0.0
+        self.career_level: int = 1
+        self.career_branch: str = "base"
+        self.work_from_home_task: dict | None = None
+        self.occult_power: float = 0.0
+        self.university_status: str = "none"
+        self.degree_track: str = ""
+        self.degree_progress: float = 0.0
+        self.occult_perks: list[str] = []
+        self.occult_weaknesses: list[str] = []
+        self.pet_ids: list[str] = []
+        self.travel_history: list[str] = []
+        # Marriage / relationship status
+        self._married_to: str | None = None
+        self._divorce_risk_ticks: int = 0
+        # Fame / celebrity
+        self.celebrity_score: float = 0.0
+        self.celebrity_tier: str = "none"
+        # Lifetime wish
+        from core.lifetime_wish import generate_wish
+
+        self.lifetime_wish = generate_wish(self.profile.get("aspiration", "Fortune"))
+        # Aspiration milestones
+        from core.aspiration_rewards import generate_progress
+
+        self.aspiration_progress = generate_progress(
+            self.profile.get("aspiration", "Fortune")
+        )
+        # Club memberships (populated by ClubManager)
+        self.club_ids: list[str] = []
+        # Coworkers (populated by engine init)
+        self.coworker_ids: list[str] = []
+        # Unlocked interactions (from milestone rewards)
+        self._unlocked_interactions: list[str] = []
 
     @property
     def ocean(self) -> dict:
@@ -120,8 +182,10 @@ class Sim:
         # Update social orientation from current needs + emotion
         try:
             from datasets.social_orientation import orientation_from_ocean_needs
-            needs_dict = {n: getattr(self.needs, n) for n in
-                          ["energy", "social", "fun", "hunger"]}
+
+            needs_dict = {
+                n: getattr(self.needs, n) for n in ["energy", "social", "fun", "hunger"]
+            }
             self.social_orientation = orientation_from_ocean_needs(
                 self.ocean, needs_dict, self.emotion.dominant
             )
@@ -143,6 +207,7 @@ class Sim:
 
         # Health scare counter
         from datasets.health import HEALTH_SCARE_ENERGY_THRESHOLD
+
         if self.needs.energy < HEALTH_SCARE_ENERGY_THRESHOLD:
             self._low_energy_ticks += 1
         else:

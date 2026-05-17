@@ -15,6 +15,7 @@ class RelationshipRecord:
     romance: float = 0.0
     interactions: int = 0
     memories: list[dict] = field(default_factory=list)
+    sentiments: list = field(default_factory=list)   # list[SentimentRecord]
     # Toxic cycle tracking (Gap 4)
     in_toxic_cycle: bool = False
     toxic_cycle_phase: str = "none"

@@ -99,8 +99,16 @@ def choose_interaction(
     ocean = sim_a.ocean
     candidates: list[tuple[str, float]] = []
 
+    # ── Reputation gating — adjust base weights before building candidate list ─
+    rep_b = getattr(sim_b, "reputation_score", 0.0)
+    rep_a = getattr(sim_a, "reputation_score", 0.0)
+    # How willing sim_a is to be warm toward sim_b (0.5 if villainous, 1.5 if celebrated)
+    warmth_mod = max(0.5, min(1.5, 1.0 + rep_b / 100.0))
+    # Sims with bad own reputation lean toward hostile/defensive interactions
+    hostility_mod = max(1.0, 1.0 + (-rep_a / 80.0))
+
     for action in INTERACTION_TYPES["friendly"]:
-        candidates.append((action, 1.0 + ocean["extraversion"] * 0.5))
+        candidates.append((action, (1.0 + ocean["extraversion"] * 0.5) * warmth_mod))
 
     if (
         sim_a.skills.levels.get("comedy", 0) > 1
@@ -111,11 +119,11 @@ def choose_interaction(
 
     if mood < 0.35 or "hot-headed" in sim_a.profile["traits"]:
         for action in INTERACTION_TYPES["mean"]:
-            candidates.append((action, (1 - mood) * 0.6))
+            candidates.append((action, (1 - mood) * 0.6 * hostility_mod))
 
     if friendship_score >= REL_FRIEND:
         for action in INTERACTION_TYPES["deep"]:
-            candidates.append((action, 0.7 + ocean["openness"] * 0.3))
+            candidates.append((action, (0.7 + ocean["openness"] * 0.3) * warmth_mod))
 
     if friendship_score >= REL_ACQUAINTANCE:
         is_romantic = (
@@ -144,6 +152,15 @@ def choose_interaction(
 
     for special in sim_a.skills.unlocked_interactions():
         candidates.append((special, 1.2))
+
+    # ── Marriage proposal — unlocked at high romance + no current marriage ────
+    if (
+        romance_score >= 85
+        and not getattr(sim_a, "_married_to", None)
+        and not getattr(sim_b, "_married_to", None)
+        and "first_love" in {s.name for s in getattr(relationship, "sentiments", [])}
+    ):
+        candidates.append(("propose marriage", 0.8))
 
     # ── Interest-match bonding ────────────────────────────────────────────────
     if datasets is not None and hasattr(datasets, "interests_data") and datasets.interests_data:
@@ -681,11 +698,46 @@ def choose_interaction(
             for action in INTERACTION_TYPES["deep"]:
                 candidates.append((action, 1.5))
 
+    # ── Sentiment gating — block or unlock interactions ───────────────────────
+    from core.sentiments import (
+        is_interaction_blocked,
+        sentiment_unlocked_interactions,
+    )
     candidates = [
         (action, weight)
         for action, weight in candidates
         if not sim_a.is_on_cooldown(action, current_tick)
+        and not is_interaction_blocked(relationship, action)
     ]
+    # Sentiment-unlocked interactions (with boosted weight)
+    for unlocked in sentiment_unlocked_interactions(relationship):
+        candidates.append((unlocked, 1.8))
+
+    # ── Milestone-unlocked interactions ───────────────────────────────────────
+    for unlocked in getattr(sim_a, "_unlocked_interactions", []):
+        candidates.append((unlocked, 1.5))
+
+    # ── Club rule weight modifiers ────────────────────────────────────────────
+    try:
+        import engine.engine as _eng_mod
+        if hasattr(_eng_mod, "_current_engine") and _eng_mod._current_engine:
+            mods = _eng_mod._current_engine.clubs.interaction_weight_mods(
+                sim_a.sim_id, sim_b.sim_id
+            )
+            if mods:
+                candidates = [
+                    (a, w * mods[a] if a in mods else w)
+                    for a, w in candidates
+                ]
+    except Exception:
+        pass
+
+    # ── Celebrity fan interaction ─────────────────────────────────────────────
+    from config import CELEBRITY_INTERACTION_THRESHOLD
+    if getattr(sim_b, "celebrity_score", 0) >= CELEBRITY_INTERACTION_THRESHOLD:
+        candidates.append(("ask for autograph", 1.2))
+        candidates.append(("fan encounter", 1.0))
+
     if not candidates:
         sim_a._action_cooldowns.clear()
         return "say hello"
@@ -695,6 +747,33 @@ def choose_interaction(
 
     actions, weights = zip(*candidates)
     return random.choices(actions, weights=weights, k=1)[0]
+
+
+def _reputation_adjustment(sim_b) -> float:
+    """
+    Reputation-driven score modifier for sim_b as an interaction target.
+    Negative reputation makes sims avoid this person; positive reputation
+    creates mild attraction. Avoidance is intentionally stronger than attraction.
+    """
+    from config import REPUTATION_SCORE_SCALE, REPUTATION_BOOST_CAP
+    rep = getattr(sim_b, "reputation_score", 0.0)
+    raw = rep / REPUTATION_SCORE_SCALE          # -0.50 to +0.50
+    return min(raw, REPUTATION_BOOST_CAP)       # cap upward at +0.25
+
+
+def _memory_bias(rel) -> float:
+    """
+    Score adjustment based on the shared memory valence history between two sims.
+    Positive shared history → seek each other out.
+    Negative shared history → drift apart.
+    """
+    from config import MEMORY_BIAS_LOOKBACK, MEMORY_BIAS_WEIGHT
+    memories = getattr(rel, "memories", [])
+    if not memories:
+        return 0.0
+    recent = memories[-MEMORY_BIAS_LOOKBACK:]
+    avg_valence = sum(m.get("valence", 0.0) for m in recent) / len(recent)
+    return avg_valence * MEMORY_BIAS_WEIGHT     # -0.25 to +0.25
 
 
 def pick_interaction_pair(sims: list["Sim"], relationships: "RelationshipGraph"):
@@ -711,11 +790,38 @@ def pick_interaction_pair(sims: list["Sim"], relationships: "RelationshipGraph")
             )
             if urgent_non_social_a > 0.85:
                 continue
+
+            rel = relationships.get(sim_a.sim_id, sim_b.sim_id)
+
+            # Attraction bonus — romantic sims gravitate toward compatible partners
+            from core.compatibility import attraction_score as _attr
+            attr = _attr(sim_a, sim_b)
+            attraction_bonus = attr * 0.15  # max ±0.15
+
+            # Club co-membership bonus
+            club_bonus = 0.0
+            clubs = getattr(sim_a, "_clubs", None)
+            try:
+                from world.clubs import ClubManager as _CM
+                # Access via engine if available; otherwise skip gracefully
+                import engine.engine as _eng_mod
+                if hasattr(_eng_mod, "_current_engine") and _eng_mod._current_engine:
+                    club_bonus = _eng_mod._current_engine.clubs.pair_score_bonus(
+                        sim_a.sim_id, sim_b.sim_id
+                    )
+            except Exception:
+                pass
+
             score = (
                 sim_a.want_pressure_toward(sim_b.sim_id) * 0.5
                 + sim_b.want_pressure_toward(sim_a.sim_id) * 0.3
                 + a_pressures.get("social", 0) * 0.2
                 + random.uniform(0, 0.15)
+                # Emergent mechanics — reputation and memory shape who talks to whom
+                + _reputation_adjustment(sim_b)   # avoided if bad rep; sought if good
+                + _memory_bias(rel)               # seek those with positive history
+                + attraction_bonus                # chemistry draws compatible sims
+                + club_bonus                      # club members prefer each other
             )
             candidates.append((score, sim_a, sim_b))
     if not candidates:

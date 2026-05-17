@@ -7,6 +7,8 @@ from config import (
     DIETS,
     INTERESTS_POOL,
     JOBS,
+    LIKES_POOL,
+    DISLIKES_POOL,
     TRAITS_POOL,
 )
 from identity.faker_identity import generate_identity
@@ -34,6 +36,8 @@ def generate_sim_profile(
     traits = rng.sample(TRAITS_POOL, k=rng.randint(2, 4))
     dealbreakers = rng.sample(DEALBREAKERS_POOL, k=rng.randint(1, 3))
     aspiration = rng.choice(ASPIRATIONS)
+    likes    = rng.sample(LIKES_POOL, k=rng.randint(2, 4))
+    dislikes = rng.sample(DISLIKES_POOL, k=rng.randint(2, 4))
 
     # Use a real OkCupid essay for OCEAN scoring when available
     essay = random.choice(okcupid_essays) if okcupid_essays else None
@@ -96,6 +100,8 @@ def generate_sim_profile(
         "job": job,
         "income": income,
         "interests": interests,
+        "likes": likes,
+        "dislikes": dislikes,
         "traits": traits,
         "dealbreakers": dealbreakers,
         "aspiration": aspiration,

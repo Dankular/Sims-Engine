@@ -13,6 +13,7 @@ from config import (
     GOSSIP_SPREAD_CHANCE,
     LIFE_EVENT_CHANCE,
     LIFE_EVENT_INTERVAL,
+    SOCIAL_NORMS_COUNT,
 )
 from core.memory import MemoryStore
 from core.relationships import RelationshipGraph
@@ -45,9 +46,15 @@ def _to_float(val, default: float = 0.0) -> float:
         return float(val)
     except (TypeError, ValueError):
         s = str(val).lower()
-        if "positive" in s: return abs(default) or 3.0
-        if "negative" in s: return -(abs(default) or 3.0)
+        if "positive" in s:
+            return abs(default) or 3.0
+        if "negative" in s:
+            return -(abs(default) or 3.0)
         return default
+
+
+# Module-level engine reference — lets scheduler helpers access clubs/celebrity
+_current_engine: "SimEngine | None" = None
 
 
 class SimEngine:
@@ -86,10 +93,65 @@ class SimEngine:
         self._audio_sensor = AudioEnvironmentSensor()
         self._venue: dict = {**random.choice(VENUES), **self._audio_sensor.sense()}
         self.households: list = []
+
+        # ── New systems ───────────────────────────────────────────────────────
+        from world.clubs import ClubManager
+        from world.social_events import SocialEventManager
+
+        self.clubs = ClubManager()
+        self.social_events = SocialEventManager()
+        # Clubs are formed after households are assigned; deferred to first tick
+        self._clubs_formed = False
+        # Coworker assignment
+        self._assign_coworkers()
+        # Register self so scheduler helpers can reach clubs/celebrity data
+        import engine.engine as _self_mod
+
+        _self_mod._current_engine = self
+
         self._relationship_story_arcs: dict[tuple[str, str], dict[str, object]] = {}
+        self._pregnancies: dict[str, object] = {}  # pregnancy_id → PregnancyRecord
+        self._try_for_baby_intents: list[dict[str, str | int]] = []
+        self._custody: dict[str, dict[str, object]] = {}
+        self._calendar_events: list[dict[str, object]] = []
+
+        # New systems (Tier 1 & 2 gaps)
+        from world.weather import WeatherSystem
+        from world.crafting import CraftingEngine
+        from world.phone import PhoneSystem
+        from world.gigs import GigManager
+        from world.property import PropertyManager
+        from world.calendar import GameCalendar
+        from core.illness import IllnessSystem
+        from narrative.drama import DramaCascade
+        from narrative.pregnancy import PregnancySystem
+
+        self.weather = WeatherSystem()
+        self.crafting = CraftingEngine()
+        self.phone = PhoneSystem()
+        self.gigs = GigManager()
+        self.properties = PropertyManager()
+        self.calendar = GameCalendar(
+            ticks_per_year=getattr(self, "_ticks_per_year", 365)
+        )
+        self.illness = IllnessSystem()
+        self.drama = DramaCascade()
+        self.pregnancy = PregnancySystem()
+
+        # Attach moodlets to all sims
+        from core.moodlets import MoodletStack
+
+        for sim in self.sims:
+            if not hasattr(sim, "moodlets"):
+                sim.moodlets = MoodletStack()
 
         self._bus.on("tick_complete", self._on_tick_complete)
         assign_lod_tiers(self.sims)
+
+        # Network layer — None until attach_network() is called
+        self._network = None
+        self._current_room: str = "global"
+        self._local_sim_ids: set[str] = {s.sim_id for s in sims}
 
     @property
     def tick_count(self) -> int:
@@ -116,14 +178,18 @@ class SimEngine:
         # Tick all sims — DORMANT gets minimal decay only (no full tick)
         from config import NEEDS_DECAY
         from core.arcs import (
-            grief_tick, loneliness_tick, burnout_tick,
-            should_trigger_burnout, apply_burnout, maybe_generate_dream,
+            grief_tick,
+            loneliness_tick,
+            burnout_tick,
+            should_trigger_burnout,
+            apply_burnout,
+            maybe_generate_dream,
         )
 
         # Track which sims had a social interaction this tick
-        _had_interaction: set[str] = {
-            item.sim_a_id for item in self._pending
-        } | {item.sim_b_id for item in self._pending}
+        _had_interaction: set[str] = {item.sim_a_id for item in self._pending} | {
+            item.sim_b_id for item in self._pending
+        }
 
         for sim in self.sims:
             if sim.lod_tier == LODTier.DORMANT:
@@ -140,8 +206,12 @@ class SimEngine:
 
             if should_trigger_burnout(sim):
                 apply_burnout(sim)
-                self._run_life_event(sim, None, event_type="burnout",
-                                     context=f"{sim.name} is burned out after sustained overwork.")
+                self._run_life_event(
+                    sim,
+                    None,
+                    event_type="burnout",
+                    context=f"{sim.name} is burned out after sustained overwork.",
+                )
                 logger.info("[BURNOUT] %s", sim.name)
 
             # Seasonal / time-of-day mood modulation (Tier 3, #11)
@@ -151,6 +221,7 @@ class SimEngine:
             if sim.profile.get("age", 0) >= 60:
                 try:
                     from core.life_stage import elder_tick_effects
+
                     elder_tick_effects(sim)
                 except Exception:
                     pass
@@ -158,19 +229,27 @@ class SimEngine:
             # System 4: clear expired goals, set arc-state goals
             try:
                 from core.goals import clear_expired_goal, set_goal_from_arc
+
                 clear_expired_goal(sim, self._tick_count)
                 # Grief bargaining → apologise goal; depression → confide
                 if sim.grief_stage in (2, 3) and not getattr(sim, "_active_goal", None):
-                    arc_key = "grief:bargaining" if sim.grief_stage == 2 else "grief:depression"
+                    arc_key = (
+                        "grief:bargaining"
+                        if sim.grief_stage == 2
+                        else "grief:depression"
+                    )
                     closest_id = self._find_closest_friend_id(sim)
                     if closest_id:
                         set_goal_from_arc(sim, arc_key, closest_id, self._tick_count)
                 # Loneliness → seek comfort goal
                 from core.arcs import is_lonely
+
                 if is_lonely(sim) and not getattr(sim, "_active_goal", None):
                     closest_id = self._find_closest_friend_id(sim)
                     if closest_id:
-                        set_goal_from_arc(sim, "loneliness", closest_id, self._tick_count)
+                        set_goal_from_arc(
+                            sim, "loneliness", closest_id, self._tick_count
+                        )
             except Exception:
                 pass
 
@@ -178,33 +257,49 @@ class SimEngine:
             dream = maybe_generate_dream(sim)
             if dream:
                 tag = f"dream:{dream[8:50]}"
-                self.memory_store.write(sim.sim_id, sim.sim_id, tag, 0.0,
-                                        tick=self._tick_count)
+                self.memory_store.write(
+                    sim.sim_id, sim.sim_id, tag, 0.0, tick=self._tick_count
+                )
                 logger.debug("[DREAM] %s: %s", sim.name, dream[:60])
 
             # System 5: sleep-phase memory consolidation
             try:
-                from core.consolidation import consolidate_memories, CONSOLIDATION_ENERGY_THRESHOLD
+                from core.consolidation import (
+                    consolidate_memories,
+                    CONSOLIDATION_ENERGY_THRESHOLD,
+                )
+
                 if sim.needs.energy <= CONSOLIDATION_ENERGY_THRESHOLD:
-                    consolidated = consolidate_memories(sim, self.memory_store, self._tick_count)
+                    consolidated = consolidate_memories(
+                        sim, self.memory_store, self._tick_count
+                    )
                     if consolidated:
                         if self._db:
                             self._db.log_event(
-                                self._tick_count, sim.sim_id,
+                                self._tick_count,
+                                sim.sim_id,
                                 "memory_consolidation",
                                 {"summary": consolidated[:250]},
                             )
-                        logger.info("[CONSOLIDATION] %s: %s", sim.name, consolidated[:60])
+                        logger.info(
+                            "[CONSOLIDATION] %s: %s", sim.name, consolidated[:60]
+                        )
             except Exception:
                 pass
 
         # Autonomous self-care — free, no simoleons needed, always available
         from config import (
-            SLEEP_ENERGY_THRESHOLD, SLEEP_ENERGY_RESTORE, SLEEP_WAKE_THRESHOLD,
-            HUNGER_HOME_THRESHOLD, HUNGER_HOME_RESTORE,
-            BLADDER_FLUSH_THRESHOLD, BLADDER_RESTORE,
-            HYGIENE_SHOWER_THRESHOLD, HYGIENE_RESTORE,
+            SLEEP_ENERGY_THRESHOLD,
+            SLEEP_ENERGY_RESTORE,
+            SLEEP_WAKE_THRESHOLD,
+            HUNGER_HOME_THRESHOLD,
+            HUNGER_HOME_RESTORE,
+            BLADDER_FLUSH_THRESHOLD,
+            BLADDER_RESTORE,
+            HYGIENE_SHOWER_THRESHOLD,
+            HYGIENE_RESTORE,
         )
+
         for sim in self.sims:
             n = sim.needs
 
@@ -219,7 +314,9 @@ class SimEngine:
                     sim._sleeping = False
                     sim.emotion.add("optimism", 0.4, duration=4, source="well_rested")
                 else:
-                    n.energy = min(100.0, n.energy + SLEEP_ENERGY_RESTORE)  # keep sleeping
+                    n.energy = min(
+                        100.0, n.energy + SLEEP_ENERGY_RESTORE
+                    )  # keep sleeping
 
             # Basic at-home eating
             if n.hunger < HUNGER_HOME_THRESHOLD:
@@ -261,10 +358,21 @@ class SimEngine:
 
         # Active LOD: queue one LLM interaction when the queue is empty
         # Exclude sleeping sims from interaction pool
-        active = [s for s in self.sims
-                  if s.lod_tier == LODTier.ACTIVE and not getattr(s, "_sleeping", False)]
-        if len(active) >= 2 and not self._pending:
-            pair = pick_interaction_pair(active, self.relationships)
+        active = [
+            s
+            for s in self.sims
+            if s.lod_tier == LODTier.ACTIVE and not getattr(s, "_sleeping", False)
+        ]
+        # Include remote sims from the network registry as interaction candidates
+        candidates = active + (
+            self._network.registry.get_room_stubs(
+                self._current_room, self._local_sim_ids
+            )
+            if self._network
+            else []
+        )
+        if len(candidates) >= 2 and not self._pending:
+            pair = pick_interaction_pair(candidates, self.relationships)
             if pair:
                 sim_a, sim_b = pair
                 rel = self.relationships.get(sim_a.sim_id, sim_b.sim_id)
@@ -273,7 +381,16 @@ class SimEngine:
                 interaction = choose_interaction(
                     sim_a, sim_b, rel, self._tick_count, self._datasets
                 )
-                self._submit_interaction(sim_a, sim_b, interaction, self._venue)
+                if self._network and sim_b.sim_id not in self._local_sim_ids:
+                    # Remote sim — submit via NATS in the thread pool (non-blocking)
+                    self._pool.submit(
+                        self._submit_remote_interaction,
+                        sim_a,
+                        sim_b.sim_id,
+                        interaction,
+                    )
+                else:
+                    self._submit_interaction(sim_a, sim_b, interaction, self._venue)
 
         # Venue rotation every 10 ticks with updated audio sensor
         if self._tick_count % 10 == 0:
@@ -288,6 +405,29 @@ class SimEngine:
         # Periodic relationship decay
         if self._tick_count % 10 == 0:
             self.relationships.decay_all()
+
+        # Core lifecycle/economy extensions
+        self._process_gestation()
+        self._try_adoption_event()
+        self._process_illness_and_transmission()
+        self._process_temperature_risk(hour)
+        self._process_family_planning()
+        self._run_custody_schedule()
+        self._run_gig_economy()
+        self._run_odd_jobs()
+        self._process_bills_and_household_expenses()
+        self._run_property_system()
+        self._run_business_system()
+        self._run_education_system()
+        self._run_university_system()
+        self._run_career_progression_system()
+        self._run_occult_system()
+        self._run_perk_progression()
+        self._process_phone_actions()
+        self._run_calendar_events()
+        self._process_survival_hazards()
+        self._run_travel_system()
+        self._run_pet_system()
 
         # Career events + mentor session check
         if self._tick_count % CAREER_EVENT_INTERVAL == 0:
@@ -327,6 +467,7 @@ class SimEngine:
 
         # Aging — advance age every TICKS_PER_YEAR ticks, check death
         from config import TICKS_PER_YEAR
+
         if self._tick_count % TICKS_PER_YEAR == 0:
             self._advance_all_ages()
 
@@ -361,6 +502,79 @@ class SimEngine:
                 self._db.save_state(self)
             except Exception as exc:
                 logger.warning("Autosave failed: %s", exc)
+
+        # ── New systems (Tier 1 & 2 gaps) ────────────────────────────────────
+        self.weather.tick(self)
+        self.crafting.tick(self)
+        self.phone.tick(self)
+        self.gigs.tick(self)
+        self.properties.tick(self)
+        self.calendar.tick(self)
+        self.illness.tick(self)
+        self.pregnancy.tick(self)
+
+        # Tick moodlets on all sims
+        for sim in self.sims:
+            if hasattr(sim, "moodlets"):
+                sim.moodlets.tick()
+
+        # ── New emergent systems ──────────────────────────────────────────────
+
+        # Form clubs on first tick (households assigned by then)
+        if not self._clubs_formed:
+            self.clubs.form_clubs(self.sims, self._tick_count)
+            self._clubs_formed = True
+
+        # Club meetings every CLUB_MEETING_INTERVAL ticks
+        self.clubs.tick(self)
+
+        # Social events (parties, weddings)
+        self.social_events.tick(self)
+
+        # Divorce check — every tick
+        from narrative.marriage import check_divorces
+
+        check_divorces(self)
+
+        # Sentiment decay — every tick for all relationship pairs
+        from core.sentiments import decay_sentiments
+
+        for _, rel in self.relationships.all_pairs():
+            decay_sentiments(rel, self._tick_count)
+
+        # Lifetime wish + aspiration milestone checks (every 10 ticks)
+        if self._tick_count % 10 == 0:
+            from core.lifetime_wish import check_wish
+            from core.aspiration_rewards import tick_aspiration
+
+            for sim in self.sims:
+                if check_wish(sim, self, self._tick_count):
+                    logger.info(
+                        "[Wish] %s fulfilled lifetime wish: %s",
+                        sim.name,
+                        sim.lifetime_wish.description,
+                    )
+                    self._bus.emit("wish_fulfilled", sim=sim, tick=self._tick_count)
+                newly = tick_aspiration(sim, self, self._tick_count)
+                for ms_label in newly:
+                    logger.info("[Milestone] %s achieved: %s", sim.name, ms_label)
+                    self._bus.emit(
+                        "milestone_achieved",
+                        sim=sim,
+                        milestone=ms_label,
+                        tick=self._tick_count,
+                    )
+
+        # Celebrity score update (every 5 ticks)
+        if self._tick_count % 5 == 0:
+            self._update_celebrity_scores()
+
+        # Broadcast local sim states to the network room (no-op when offline)
+        if self._network:
+            self._network.publish_states(
+                self._current_room,
+                [self._sim_to_network_state(s) for s in self.sims],
+            )
 
         self._bus.emit("tick_complete", engine=self, tick=self._tick_count, hour=hour)
 
@@ -405,9 +619,64 @@ class SimEngine:
                     "active_wants": [w.description for w in sim.active_wants],
                     "fears": [f.label for f in sim.fears],
                     "skills": sim.skills.levels,
+                    "inventory": list(sim.inventory),
+                    "properties": list(sim.properties),
+                    "health_status": sim.health_status,
+                    "temperature_risk": round(sim.temperature_risk, 2),
+                    "perk_points": sim.perk_points,
+                    "perks": sorted(sim.perks),
+                    "active_gig": sim.active_gig,
+                    "active_odd_job": sim.active_odd_job,
+                    "odd_job_reputation": round(sim.odd_job_reputation, 1),
+                    "hazard_flags": dict(sim.hazard_flags),
+                    "owned_businesses": list(sim.owned_businesses),
+                    "career_level": sim.career_level,
+                    "career_branch": sim.career_branch,
+                    "work_from_home_task": sim.work_from_home_task,
+                    "school_performance": round(sim.school_performance, 1),
+                    "homework_progress": round(sim.homework_progress, 1),
+                    "scholarship_points": round(sim.scholarship_points, 1),
+                    "university_readiness": round(sim.university_readiness, 1),
+                    "university_status": sim.university_status,
+                    "degree_track": sim.degree_track,
+                    "degree_progress": round(sim.degree_progress, 1),
+                    "occult_power": round(sim.occult_power, 1),
+                    "occult_perks": list(sim.occult_perks),
+                    "occult_weaknesses": list(sim.occult_weaknesses),
+                    "pet_ids": list(sim.pet_ids),
+                    "travel_history": list(sim.travel_history),
+                    "pending_invitations": list(sim.pending_invitations),
+                    "is_ghost": sim.is_ghost,
+                    "occult_type": sim.occult_type,
                     "ocean": sim.profile["ocean"],
                     "household_id": sim.household_id,
                     "parent_ids": sim.parent_ids,
+                    "married_to": getattr(sim, "_married_to", None),
+                    "celebrity_tier": getattr(sim, "celebrity_tier", "none"),
+                    "celebrity_score": round(getattr(sim, "celebrity_score", 0.0), 1),
+                    "health_status": getattr(sim, "health_status", "healthy"),
+                    "active_gig": sim.active_gig.gig_type
+                    if getattr(sim, "active_gig", None)
+                    else None,
+                    "moodlets": sim.moodlets.active()
+                    if hasattr(sim, "moodlets")
+                    else [],
+                    "dominant_moodlet": sim.moodlets.dominant_label()
+                    if hasattr(sim, "moodlets")
+                    else None,
+                    "property_count": len(getattr(sim, "properties", [])),
+                    "property_value": round(
+                        self.properties.total_portfolio_value(sim.sim_id), 2
+                    ),
+                    "crafted_items": len(getattr(sim, "crafted_inventory", [])),
+                    "lifetime_wish": {
+                        "description": sim.lifetime_wish.description,
+                        "fulfilled": sim.lifetime_wish.fulfilled,
+                        "progress": round(sim.lifetime_wish._progress_cache, 2),
+                    }
+                    if hasattr(sim, "lifetime_wish")
+                    else None,
+                    "club_count": len(getattr(sim, "club_ids", [])),
                     "relationships": rels,
                 }
             )
@@ -441,6 +710,24 @@ class SimEngine:
                 }
                 for hh in self.households
             ],
+            "pregnancies": list(self._pregnancies),
+            "try_for_baby_intents": list(self._try_for_baby_intents),
+            "custody": self._custody,
+            "calendar_events": list(self._calendar_events),
+            "clubs": [
+                {
+                    "name": c.name,
+                    "interest": c.interest,
+                    "venue": c.meeting_venue,
+                    "members": c.member_ids,
+                    "rule": c.rule,
+                }
+                for c in self.clubs.clubs
+            ],
+            "pending_events": len(self.social_events.get_pending()),
+            "weather": self.weather.state_dict(),
+            "calendar": self.calendar.date_dict(self._tick_count),
+            "active_pregnancies": len(self._pregnancies),
         }
 
     def flush_pending(self) -> None:
@@ -461,11 +748,289 @@ class SimEngine:
                     )
 
     def shutdown(self) -> None:
+        if self._network:
+            self._network.shutdown()
         self._pool.shutdown(wait=False)
         if self._db:
             self._db.close()
 
-    # ── Internal helpers ──────────────────────────────────────────────────────
+    # ── Network API ───────────────────────────────────────────────────────────
+
+    def attach_network(self, network, room_id: str = "global") -> None:
+        """
+        Wire a NATSNetwork into this engine.  Call after construction.
+
+        The network handles:
+          - Broadcasting local sim states after every tick
+          - Discovering remote sims from the registry for interaction pairing
+          - Request-reply for cross-client social interactions
+          - Syncing relationship deltas and gossip across clients
+        """
+        self._network = network
+        self._current_room = room_id
+        network.set_adjudicator(self._handle_remote_interaction_request)
+        network.set_relationship_handler(self._on_network_relationship)
+        network.set_gossip_handler(self._on_network_gossip)
+        network.set_client_left_handler(
+            lambda cid: logger.info("[Engine] client %s left", cid[:8])
+        )
+        logger.info("[Engine] Network attached — room='%s'", room_id)
+
+    def _sim_to_network_state(self, sim) -> dict:
+        """Richer state dict for NATS broadcasts — includes profile fields that
+        RemoteSimStub needs to reconstruct a full proxy object."""
+        p = sim.profile
+        return {
+            "id": sim.sim_id,
+            "name": sim.name,
+            "job": p.get("job", ""),
+            "age": p.get("age", 25),
+            "gender": p.get("gender", ""),
+            "traits": p.get("traits", []),
+            "dealbreakers": p.get("dealbreakers", []),
+            "aspiration": p.get("aspiration", ""),
+            "humor_type": p.get("humor_type", ""),
+            "comm_style": p.get("comm_style", ""),
+            "attachment": p.get("attachment", ""),
+            "interests": p.get("interests", []),
+            "mbti": p.get("mbti", ""),
+            "zodiac": p.get("zodiac", ""),
+            "ocean": p.get("ocean", {}),
+            "simoleons": round(sim.simoleons, 2),
+            "career_performance": round(sim.career_performance, 1),
+            "lod_tier": sim.lod_tier.name,
+            "dominant_emotion": sim.emotion.dominant,
+            "dominant_valence": sim.emotion.dominant_valence,
+            "needs": {
+                n: round(getattr(sim.needs, n), 1)
+                for n in [
+                    "hunger",
+                    "energy",
+                    "social",
+                    "fun",
+                    "hygiene",
+                    "environment",
+                    "bladder",
+                    "comfort",
+                ]
+            },
+            "fears": [f.label for f in sim.fears],
+            "skills": sim.skills.levels,
+            "household_id": sim.household_id,
+            "parent_ids": sim.parent_ids,
+            "reputation_score": sim.reputation_score,
+            "ei_reputation": sim.ei_reputation,
+            "social_orientation": sim.social_orientation,
+        }
+
+    def _submit_remote_interaction(
+        self, sim_a, target_sim_id: str, interaction: str
+    ) -> None:
+        """
+        Called in thread-pool.  Sends an interaction request to the owner of
+        target_sim_id via NATS request-reply, then applies the result locally.
+        """
+        if not self._network:
+            return
+        result = self._network.request_interaction(
+            room_id=self._current_room,
+            sim_a_state=self._sim_to_network_state(sim_a),
+            target_sim_id=target_sim_id,
+            action=interaction,
+            venue=dict(self._venue),
+            tick=self._tick_count,
+        )
+        if result and "error" not in result:
+            self._apply_network_result(sim_a, target_sim_id, interaction, result)
+        elif result:
+            logger.warning("[Engine] remote interact failed: %s", result.get("error"))
+
+    def _apply_network_result(
+        self, sim_a, target_sim_id: str, interaction: str, result: dict
+    ) -> None:
+        """Apply initiator-side deltas after a cross-client interaction resolves."""
+        fd = _to_float(result.get("friendship_delta", 0))
+        rd = _to_float(result.get("romance_delta", 0))
+        valence = max(-1.0, min(1.0, _to_float(result.get("valence", 0.5), 0.5)))
+
+        rel = self.relationships.get(sim_a.sim_id, target_sim_id)
+        rel.apply_deltas(fd, rd)
+
+        emo_a = result.get("emotion_a", "")
+        if emo_a:
+            sim_a.emotion.add(emo_a, 0.7, duration=4, source=interaction)
+
+        sim_a.needs.restore("social", _to_float(result.get("social_need_restore_a", 0)))
+        sim_a.needs.restore("fun", _to_float(result.get("fun_restore_a", 0)))
+
+        memory_tag = result.get("memory_tag", interaction)
+        self.memory_store.write(
+            sim_a.sim_id,
+            target_sim_id,
+            memory_tag,
+            valence,
+            tick=self._tick_count,
+        )
+        rel.add_memory(memory_tag, valence)
+
+        # Publish rel delta so the target client (and other observers) sync
+        if self._network:
+            self._network.publish_relationship(
+                self._current_room,
+                sim_a.sim_id,
+                target_sim_id,
+                fd,
+                rd,
+                memory_tag,
+                valence,
+                self._tick_count,
+            )
+
+        self._bus.emit(
+            "interaction_resolved",
+            sim_a=sim_a,
+            sim_b=None,  # remote — no local Sim object
+            result=result,
+            valence=valence,
+            interaction=interaction,
+            tick=self._tick_count,
+        )
+        logger.info(
+            "[Net] %s → remote %s  [%s]  fd=%+.1f  val=%+.2f",
+            sim_a.name,
+            target_sim_id[:8],
+            interaction[:30],
+            fd,
+            valence,
+        )
+
+    def _handle_remote_interaction_request(
+        self, our_sim_id: str, request_data: dict
+    ) -> dict:
+        """
+        Called in thread-pool by NATSNetwork when a remote sim initiates an
+        interaction with one of our local sims (sim_b).  Runs a full LLM
+        adjudication, applies deltas to sim_b, and returns the result dict.
+        """
+        sim_b = self._sim_lookup.get(our_sim_id)
+        if sim_b is None:
+            return {"error": f"sim {our_sim_id} not found locally"}
+
+        # Build a proxy for the remote initiator
+        initiator_state = request_data.get("initiator_state", {})
+        sim_a_stub = self._network.registry.make_stub(initiator_state)
+        action = request_data.get("action", "say hello")
+        venue = request_data.get("venue", self._venue)
+
+        rel = self.relationships.get(sim_a_stub.sim_id, sim_b.sim_id)
+        memories = self.memory_store.recall(
+            sim_b.sim_id, sim_a_stub.sim_id, query=action
+        )
+        norms: list[str] = []
+        if self._datasets and self._datasets.social_norms:
+            import random as _rnd
+
+            norms = _rnd.sample(
+                self._datasets.social_norms,
+                min(SOCIAL_NORMS_COUNT, len(self._datasets.social_norms)),
+            )
+
+        system = build_adjudicator_system(
+            norms, datasets=self._datasets, interaction=action
+        )
+        context_str = get_interaction_context(
+            action,
+            sim_a_stub,
+            sim_b,
+            datasets=self._datasets,
+            memory_store=self.memory_store,
+            current_tick=self._tick_count,
+        )
+        user_msg = self._build_user_message(
+            sim_a_stub, sim_b, action, rel, memories, venue, context_str
+        )
+
+        try:
+            result = call_adjudicator(self._llm, system, user_msg)
+        except Exception as exc:
+            logger.warning("[Engine] remote adjudication failed: %s", exc)
+            return {"error": str(exc)}
+
+        # Apply sim_b-side deltas locally
+        fd = _to_float(result.get("friendship_delta", 0))
+        rd = _to_float(result.get("romance_delta", 0))
+        valence = max(-1.0, min(1.0, _to_float(result.get("valence", 0.5), 0.5)))
+        rel.apply_deltas(fd, rd)
+
+        emo_b = result.get("emotion_b", "")
+        if emo_b:
+            sim_b.emotion.add(emo_b, 0.7, duration=4, source=action)
+
+        sim_b.needs.restore("social", _to_float(result.get("social_need_restore_b", 0)))
+        sim_b.needs.restore("fun", _to_float(result.get("fun_restore_b", 0)))
+
+        memory_tag = result.get("memory_tag", action)
+        self.memory_store.write(
+            sim_b.sim_id,
+            sim_a_stub.sim_id,
+            memory_tag,
+            valence,
+            tick=self._tick_count,
+        )
+        rel.add_memory(memory_tag, valence)
+
+        # Broadcast the rel delta into the room
+        if self._network:
+            self._network.publish_relationship(
+                self._current_room,
+                sim_a_stub.sim_id,
+                sim_b.sim_id,
+                fd,
+                rd,
+                memory_tag,
+                valence,
+                self._tick_count,
+            )
+
+        logger.info(
+            "[Net] remote %s → %s  [%s]  fd=%+.1f  val=%+.2f",
+            sim_a_stub.name,
+            sim_b.name,
+            action[:30],
+            fd,
+            valence,
+        )
+        return result
+
+    def _on_network_relationship(self, delta: dict) -> None:
+        """Apply an incoming relationship delta from another client."""
+        sim_a_id = delta.get("sim_a_id", "")
+        sim_b_id = delta.get("sim_b_id", "")
+        if not sim_a_id or not sim_b_id:
+            return
+        # Only apply if at least one side is our local sim (avoid double-apply
+        # for interactions we originated or adjudicated ourselves)
+        if sim_a_id in self._local_sim_ids or sim_b_id in self._local_sim_ids:
+            return
+        fd = _to_float(delta.get("friendship_delta", 0))
+        rd = _to_float(delta.get("romance_delta", 0))
+        rel = self.relationships.get(sim_a_id, sim_b_id)
+        rel.apply_deltas(fd, rd)
+        memory_tag = delta.get("memory_tag", "")
+        valence = _to_float(delta.get("valence", 0.0))
+        if memory_tag:
+            rel.add_memory(memory_tag, valence)
+
+    def _on_network_gossip(self, data: dict) -> None:
+        """Apply incoming gossip spread from another client."""
+        spreader_id = data.get("spreader_id", "")
+        receiver_id = data.get("receiver_id", "")
+        subject_id = data.get("subject_id", "")
+        memory_tag = data.get("memory_tag", "")
+        if spreader_id and receiver_id and subject_id:
+            self.gossip.learn(receiver_id, subject_id, memory_tag)
+
+    # ── Internal helpers ───────────────────────────────────────────────────────
 
     def _submit_interaction(
         self, sim_a: Sim, sim_b: Sim, interaction: str, venue: dict
@@ -479,14 +1044,16 @@ class SimEngine:
         if self._datasets and self._datasets.social_norms:
             norms = random.sample(
                 self._datasets.social_norms,
-                min(3, len(self._datasets.social_norms)),
+                min(SOCIAL_NORMS_COUNT, len(self._datasets.social_norms)),
             )
         system = build_adjudicator_system(
             norms, datasets=self._datasets, interaction=interaction
         )
         # Systems 1 + 2: inject semantic memories + dialogue buffer into context
         context_str = get_interaction_context(
-            interaction, sim_a, sim_b,
+            interaction,
+            sim_a,
+            sim_b,
             datasets=self._datasets,
             memory_store=self.memory_store,
             current_tick=self._tick_count,
@@ -539,6 +1106,7 @@ class SimEngine:
         # System 2: Sentiment-modulated deltas — graded outcomes from reaction text
         try:
             from llm.small_models import get_sentiment, get_ekman, sentiment_to_modifier
+
             reaction_text = result.get("sim_b_reaction", "")
             if reaction_text:
                 sent_pipe = get_sentiment()
@@ -551,9 +1119,18 @@ class SimEngine:
                 ekman_pipe = get_ekman()
                 if ekman_pipe is not None and fd > 0:
                     ekman_result = ekman_pipe(reaction_text[:512])
-                    labels = ekman_result[0] if isinstance(ekman_result[0], list) else ekman_result
+                    labels = (
+                        ekman_result[0]
+                        if isinstance(ekman_result[0], list)
+                        else ekman_result
+                    )
                     surprise_score = next(
-                        (r["score"] for r in labels if r["label"].lower() == "surprise"), 0.0
+                        (
+                            r["score"]
+                            for r in labels
+                            if r["label"].lower() == "surprise"
+                        ),
+                        0.0,
                     )
                     if surprise_score > 0.4:
                         fd = round(fd * (1.0 + surprise_score * 0.3), 2)
@@ -565,9 +1142,9 @@ class SimEngine:
         valence = max(-1.0, min(1.0, _to_float(result.get("valence", 0.5), 0.5)))
 
         sim_a.needs.restore("social", _to_float(result.get("social_need_restore_a", 0)))
-        sim_a.needs.restore("fun",    _to_float(result.get("fun_restore_a", 0)))
+        sim_a.needs.restore("fun", _to_float(result.get("fun_restore_a", 0)))
         sim_b.needs.restore("social", _to_float(result.get("social_need_restore_b", 0)))
-        sim_b.needs.restore("fun",    _to_float(result.get("fun_restore_b", 0)))
+        sim_b.needs.restore("fun", _to_float(result.get("fun_restore_b", 0)))
 
         emo_a = result.get("emotion_a", "")
         emo_b = result.get("emotion_b", "")
@@ -596,9 +1173,13 @@ class SimEngine:
                 classified = classify(text, threshold=0.30, top_k=2)
                 if classified:
                     # Primary emotion from classifier (higher confidence than LLM alone)
-                    sim.emotion.add(classified[0], 0.75, duration=4, source="goemo_primary")
+                    sim.emotion.add(
+                        classified[0], 0.75, duration=4, source="goemo_primary"
+                    )
                     if len(classified) > 1:
-                        sim.emotion.add(classified[1], 0.35, duration=2, source="goemo_secondary")
+                        sim.emotion.add(
+                            classified[1], 0.35, duration=2, source="goemo_secondary"
+                        )
                 elif llm_emo:
                     # Fallback: use LLM emotion if classifier has nothing
                     sim.emotion.add(llm_emo, 0.7, duration=4, source="life event")
@@ -677,7 +1258,9 @@ class SimEngine:
                     )
                     logger.debug(
                         "[AITA] %s verdict=%s rep=%.0f",
-                        sim_a.name, verdict, sim_a.reputation_score,
+                        sim_a.name,
+                        verdict,
+                        sim_a.reputation_score,
                     )
                     # Gap 3: Reputation gossip propagation — scandal spreads
                     rep_drop = rep_before - sim_a.reputation_score
@@ -687,14 +1270,17 @@ class SimEngine:
                             f"'{item.interaction[:40]}' — community is talking"
                         )
                         bystanders = [
-                            s for s in self.sims
+                            s
+                            for s in self.sims
                             if s.sim_id not in (sim_a.sim_id, sim_b.sim_id)
                         ][:3]
                         for bystander in bystanders:
                             self.gossip.learn(bystander.sim_id, sim_a.sim_id, scandal)
                         logger.info(
                             "[SCANDAL] %s rep drop %.0f → gossip spread to %d sims",
-                            sim_a.name, rep_drop, len(bystanders),
+                            sim_a.name,
+                            rep_drop,
+                            len(bystanders),
                         )
             except Exception:
                 pass
@@ -816,6 +1402,7 @@ class SimEngine:
         # Habit formation — record action repetition
         try:
             from core.arcs import register_action_history
+
             register_action_history(sim_a, item.interaction[:40])
         except Exception:
             pass
@@ -824,9 +1411,12 @@ class SimEngine:
         if abs(valence) > 0.8 and valence < 0:
             try:
                 from datasets.trauma import apply_trauma_drift
+
                 event_hint = (
-                    "loss" if "loss" in item.interaction.lower()
-                    else "conflict" if valence < -0.7
+                    "loss"
+                    if "loss" in item.interaction.lower()
+                    else "conflict"
+                    if valence < -0.7
                     else "rejection"
                 )
                 apply_trauma_drift(sim_a, event_hint)
@@ -834,7 +1424,10 @@ class SimEngine:
                 pass
 
         # Jealousy system — detect when a romantic interaction is observed by a partner
-        if "flirt" in item.interaction.lower() or "romantic" in item.interaction.lower():
+        if (
+            "flirt" in item.interaction.lower()
+            or "romantic" in item.interaction.lower()
+        ):
             try:
                 self._check_jealousy(sim_a, sim_b, valence)
             except Exception:
@@ -851,14 +1444,19 @@ class SimEngine:
         if "reassure" in item.interaction.lower() and valence > 0:
             try:
                 rel.apply_reassurance()
-                logger.debug("[JEALOUSY] %s reassured %s → score %.0f",
-                             sim_a.name, sim_b.name, rel.jealousy_score)
+                logger.debug(
+                    "[JEALOUSY] %s reassured %s → score %.0f",
+                    sim_a.name,
+                    sim_b.name,
+                    rel.jealousy_score,
+                )
             except Exception:
                 pass
 
         # System 4 + Gap 4: mark goal achieved and clear it
         try:
             from core.goals import is_goal_valid, mark_goal_achieved
+
             goal = getattr(sim_a, "_active_goal", None)
             if goal and goal.target_sim == sim_b.sim_id:
                 # Mark achieved if the interaction matches the goal type
@@ -900,6 +1498,77 @@ class SimEngine:
             rd,
             valence,
         )
+        # ── Drama cascade ─────────────────────────────────────────────────────
+        self.drama.on_resolved(sim_a, sim_b, valence, item.interaction, self)
+
+        # ── Moodlet generation from interaction outcomes ───────────────────────
+        if hasattr(sim_a, "moodlets"):
+            if valence > 0.7:
+                sim_a.moodlets.add("on_a_roll", source=item.interaction)
+            elif valence > 0.4:
+                sim_a.moodlets.add("just_had_fun", source=item.interaction)
+            elif valence < -0.5:
+                sim_a.moodlets.add("stressed", source=item.interaction)
+        if hasattr(sim_b, "moodlets"):
+            if valence > 0.7:
+                sim_b.moodlets.add("deeply_connected", source=item.interaction)
+            elif valence < -0.6:
+                sim_b.moodlets.add("embarrassed", source=item.interaction)
+
+        # ── Sentiments ────────────────────────────────────────────────────────
+        from core.sentiments import detect_sentiment, add_sentiment
+
+        triggered = detect_sentiment(
+            item.interaction,
+            valence,
+            result,
+            rel.friendship,
+            rel.romance,
+            self._tick_count,
+        )
+        for sent_name in triggered:
+            if add_sentiment(rel, sent_name, self._tick_count, source=item.interaction):
+                logger.info("[Sentiment] %s↔%s: +%s", sim_a.name, sim_b.name, sent_name)
+
+        # ── Marriage proposal check ───────────────────────────────────────────
+        if (
+            "propose" in item.interaction.lower()
+            and valence > 0.6
+            and rel.romance >= 85
+            and not getattr(sim_a, "_married_to", None)
+            and not getattr(sim_b, "_married_to", None)
+        ):
+            from narrative.marriage import marry
+
+            marry(sim_a, sim_b, self)
+
+        if (
+            (
+                "try for baby" in item.interaction.lower()
+                or "baby" in item.interaction.lower()
+            )
+            and rel.romance >= 70
+            and valence >= 0.15
+        ):
+            self._try_for_baby_intents.append(
+                {
+                    "parent_a_id": sim_a.sim_id,
+                    "parent_b_id": sim_b.sim_id,
+                    "resolve_at": self._tick_count + 1,
+                }
+            )
+
+        # ── Celebrity score boost from positive high-valence interactions ─────
+        if valence > 0.7 and rel.friendship >= 60:
+            sim_a.celebrity_score = min(100, sim_a.celebrity_score + 0.5)
+        if valence > 0.8:
+            sim_b.celebrity_score = min(100, sim_b.celebrity_score + 0.3)
+
+        # ── Emotional contagion ───────────────────────────────────────────────
+        # Close sims absorb a fraction of each other's post-interaction emotion.
+        # Strength scales linearly with friendship above the threshold.
+        self._apply_emotional_contagion(sim_a, sim_b, rel)
+
         self._bus.emit(
             "interaction_resolved",
             sim_a=sim_a,
@@ -910,6 +1579,98 @@ class SimEngine:
             interaction_id=item.interaction_id,
             interaction=item.interaction,
         )
+
+    def _assign_coworkers(self) -> None:
+        """Group sims by job category and assign them as each other's coworkers."""
+        from collections import defaultdict
+
+        by_job: dict[str, list[str]] = defaultdict(list)
+        for sim in self.sims:
+            by_job[sim.profile.get("job", "Unknown")].append(sim.sim_id)
+        for sim in self.sims:
+            job = sim.profile.get("job", "Unknown")
+            sim.coworker_ids = [sid for sid in by_job[job] if sid != sim.sim_id]
+
+    def _update_celebrity_scores(self) -> None:
+        """
+        Recalculate celebrity_score and celebrity_tier for all sims.
+        Score rises with: positive reputation, large friend network, career success.
+        """
+        from config import CELEBRITY_TIERS, CELEBRITY_SCORE_DECAY
+
+        for sim in self.sims:
+            # Reputation contribution
+            rep_contrib = max(0.0, sim.reputation_score / 5.0)
+            # Friend count contribution
+            friend_count = sum(
+                1
+                for other in self.sims
+                if other.sim_id != sim.sim_id
+                and self.relationships.get(sim.sim_id, other.sim_id).friendship >= 60
+            )
+            network_contrib = min(10.0, friend_count * 0.5)
+            # Career contribution
+            career_contrib = max(0.0, (sim.career_performance - 50) / 10.0)
+
+            target = rep_contrib + network_contrib + career_contrib
+            # Smooth toward target
+            sim.celebrity_score += (target - sim.celebrity_score) * 0.05
+            sim.celebrity_score = max(0.0, min(100.0, sim.celebrity_score))
+
+            # Update tier label
+            for tier, (lo, hi) in CELEBRITY_TIERS.items():
+                if lo <= sim.celebrity_score < hi:
+                    sim.celebrity_tier = tier
+                    break
+            else:
+                sim.celebrity_tier = "icon"
+
+    def _apply_emotional_contagion(self, sim_a: "Sim", sim_b: "Sim", rel) -> None:
+        """
+        After a resolved interaction, each sim absorbs a fraction of the other's
+        dominant emotion proportional to their friendship level.
+
+        This creates mood waves across the social graph: a grieving sim saddens
+        their close friends; a joyful sim lifts the people they're close to.
+        No effect between strangers or acquaintances.
+        """
+        from config import (
+            CONTAGION_FRIENDSHIP_MIN,
+            CONTAGION_MAX_STRENGTH,
+            CONTAGION_SKIP_EMOTIONS,
+        )
+
+        friendship = rel.friendship
+        if friendship < CONTAGION_FRIENDSHIP_MIN:
+            return
+
+        # Linear scale: 0 at threshold → CONTAGION_MAX_STRENGTH at 100
+        strength = (
+            (friendship - CONTAGION_FRIENDSHIP_MIN) / (100.0 - CONTAGION_FRIENDSHIP_MIN)
+        ) * CONTAGION_MAX_STRENGTH
+
+        emo_a = sim_a.emotion.dominant
+        emo_b = sim_b.emotion.dominant
+
+        # B catches A's emotion (e.g. A's grief bleeds into B)
+        if emo_a and emo_a not in CONTAGION_SKIP_EMOTIONS:
+            sim_b.emotion.add(
+                emo_a, round(strength * 0.6, 3), duration=2, source="contagion"
+            )
+            logger.debug(
+                "[Contagion] %s→%s catches %s from %s (strength=%.2f)",
+                sim_b.name,
+                emo_a,
+                sim_a.name,
+                emo_a,
+                strength,
+            )
+
+        # A catches B's emotion (symmetrical — shared experience creates synchrony)
+        if emo_b and emo_b not in CONTAGION_SKIP_EMOTIONS:
+            sim_a.emotion.add(
+                emo_b, round(strength * 0.6, 3), duration=2, source="contagion"
+            )
 
     @staticmethod
     def _profile_block(sim: "Sim") -> str:
@@ -1011,8 +1772,11 @@ class SimEngine:
         extra_ctx = (
             f"\n=== CONTEXTUAL KNOWLEDGE ===\n{full_context}" if full_context else ""
         )
+        from config import GGUF_USE_NO_THINK
+
+        think_prefix = "/no_think\n\n" if GGUF_USE_NO_THINK else ""
         return (
-            f"/no_think\n\n"
+            f"{think_prefix}"
             f"=== SIM A ===\n{self._profile_block(sim_a)}\n\n"
             f"=== SIM B ===\n{self._profile_block(sim_b)}\n\n"
             f"=== RELATIONSHIP (A→B) ===\n"
@@ -1081,7 +1845,7 @@ class SimEngine:
             if sim_a is None or sim_b is None:
                 continue
 
-            # Child spawning: partners who want a family
+            # Pregnancy gestation: partners enter a 3-tick pregnancy, then child is born
             if rec.romance >= 80 and not fired:
                 wants_family_a = (
                     sim_a.profile["aspiration"] == "Family"
@@ -1094,9 +1858,15 @@ class SimEngine:
                     or any("child" in w.description for w in sim_b.active_wants)
                 )
                 if (wants_family_a or wants_family_b) and random.random() < 0.20:
-                    self._spawn_child(sim_a, sim_b)
+                    self._start_pregnancy(sim_a, sim_b)
                     fired = True
                     break
+
+            # Divorce: hostile partner state can split household and funds
+            if rec.romance >= 70 and rec.friendship < -20 and random.random() < 0.18:
+                self._trigger_divorce(sim_a, sim_b)
+                fired = True
+                break
 
             # Romance milestone: dating → partners
             if 55 <= rec.romance < 65 and not fired:
@@ -1179,6 +1949,10 @@ class SimEngine:
                 if hh.id == parent_a.household_id:
                     hh.member_ids.append(child.sim_id)
                     break
+
+        self._local_sim_ids.add(child.sim_id)
+        if self._network:
+            self._network.add_owned_sim(child.sim_id)
 
         logger.info(
             "[Child] %s born to %s & %s (id=%s)",
@@ -1366,9 +2140,12 @@ class SimEngine:
             # Grief arc — trigger on loss events
             if event_type in ("loss", "health_scare") and sim_a.grief_stage < 0:
                 from core.arcs import start_grief
+
                 target_label = (sim_b.name if sim_b else context) or event_type
                 start_grief(sim_a, target_label)
-                logger.info("[Grief] %s enters grief arc for '%s'", sim_a.name, target_label)
+                logger.info(
+                    "[Grief] %s enters grief arc for '%s'", sim_a.name, target_label
+                )
 
                 # Gap 8: Multi-generational grief — children of sim_b also grieve
                 if sim_b:
@@ -1377,16 +2154,21 @@ class SimEngine:
                             start_grief(child, sim_b.name)
                             logger.info(
                                 "[GEN-GRIEF] %s (child of %s) enters grief arc",
-                                child.name, sim_b.name,
+                                child.name,
+                                sim_b.name,
                             )
 
             # System 4: NLI-inferred goal toward closest friend after notable life events
             try:
                 from core.goals import set_goal_from_life_event
+
                 closest_id = self._find_closest_friend_id(sim_a)
                 if closest_id:
                     set_goal_from_life_event(
-                        sim_a, event_type, closest_id, self._tick_count,
+                        sim_a,
+                        event_type,
+                        closest_id,
+                        self._tick_count,
                         narrative=narrative,  # pass narrative for NLI inference
                     )
             except Exception:
@@ -1431,10 +2213,13 @@ class SimEngine:
                     compute_conformity_pressure,
                     sample_herding_seed,
                 )
+
                 venue_name = self._venue.get("name", "social gathering")
                 pressures = compute_conformity_pressure_model(participants, venue_name)
                 if not pressures:
-                    pressures = compute_conformity_pressure(participants, "agreeableness")
+                    pressures = compute_conformity_pressure(
+                        participants, "agreeableness"
+                    )
                 if pressures:
                     max_pressure_id = max(pressures, key=pressures.get)
                     if pressures[max_pressure_id] > 0.6:
@@ -1463,7 +2248,12 @@ class SimEngine:
 
     def _advance_all_ages(self) -> None:
         """Called every TICKS_PER_YEAR ticks. Ages sims, fires transitions, marks deaths."""
-        from core.life_stage import advance_age, apply_stage_transition, should_die, elder_tick_effects
+        from core.life_stage import (
+            advance_age,
+            apply_stage_transition,
+            should_die,
+            elder_tick_effects,
+        )
 
         for sim in list(self.sims):
             new_age, old_stage, new_stage = advance_age(sim)
@@ -1504,6 +2294,7 @@ class SimEngine:
 
         # Trigger grief in children and closest friends
         from core.arcs import start_grief
+
         for other in self.sims:
             if other.sim_id == sim.sim_id:
                 continue
@@ -1523,7 +2314,9 @@ class SimEngine:
                 child.emotion.add("relief", 0.4, duration=4, source="inheritance")
             logger.info(
                 "[INHERITANCE] %s → §%.0f to %d child(ren)",
-                sim.name, sim.simoleons, len(children),
+                sim.name,
+                sim.simoleons,
+                len(children),
             )
 
         self._bus.emit(
@@ -1538,11 +2331,27 @@ class SimEngine:
         if not hasattr(self, "_death_queue") or not self._death_queue:
             return
         for sim_id in self._death_queue:
+            dead_sim = self._sim_lookup.get(sim_id)
+            if dead_sim and random.random() < 0.35:
+                from core.sim import Sim as SimClass
+
+                ghost_profile = dict(dead_sim.profile)
+                ghost_profile["id"] = f"ghost_{dead_sim.sim_id}"
+                ghost_profile["name"] = f"{dead_sim.name} (Ghost)"
+                ghost = SimClass(ghost_profile)
+                ghost.is_ghost = True
+                ghost.occult_type = "ghost"
+                ghost.household_id = dead_sim.household_id
+                ghost.simoleons = 0.0
+                self.sims.append(ghost)
+                self._sim_lookup[ghost.sim_id] = ghost
+
             self.sims = [s for s in self.sims if s.sim_id != sim_id]
             self._sim_lookup.pop(sim_id, None)
             # Cancel any pending interactions involving this sim
             self._pending = [
-                p for p in self._pending
+                p
+                for p in self._pending
                 if p.sim_a_id != sim_id and p.sim_b_id != sim_id
             ]
         self._death_queue.clear()
@@ -1568,6 +2377,7 @@ class SimEngine:
         """Gap 6 + System 8: Ambient NPC encounter with bg-LLM-generated dialogue."""
         try:
             from core.npc import NPCManager
+
             if not hasattr(self, "_npc_manager"):
                 self._npc_manager = NPCManager()
             npc = self._npc_manager.spawn()
@@ -1577,12 +2387,18 @@ class SimEngine:
             if dialogue:
                 outcome["memory_tag"] = f"met {npc.name}: '{dialogue[:60]}'"
             self.memory_store.write(
-                sim.sim_id, npc.npc_id,
-                outcome["memory_tag"], outcome["valence"], tick=self._tick_count,
+                sim.sim_id,
+                npc.npc_id,
+                outcome["memory_tag"],
+                outcome["valence"],
+                tick=self._tick_count,
             )
             logger.info(
                 "[NPC] %s met %s → '%s' (valence=%.2f)",
-                sim.name, npc.name, dialogue[:40] if dialogue else "", outcome["valence"]
+                sim.name,
+                npc.name,
+                dialogue[:40] if dialogue else "",
+                outcome["valence"],
             )
         except Exception as exc:
             logger.debug("NPC encounter failed: %s", exc)
@@ -1610,13 +2426,21 @@ class SimEngine:
 
             # Use a cross-household party interaction seeded from group_scenes if available
             interaction = f"[CROSS-HOUSEHOLD EVENT] {hh_a.name} hosts {hh_b.name} for a social gathering"
-            self._submit_interaction(rep_a, rep_b, interaction, {
-                "name": "house party",
-                "noise": 0.8, "intimacy": 0.4, "crowd": 0.9,
-            })
+            self._submit_interaction(
+                rep_a,
+                rep_b,
+                interaction,
+                {
+                    "name": "house party",
+                    "noise": 0.8,
+                    "intimacy": 0.4,
+                    "crowd": 0.9,
+                },
+            )
             logger.info(
                 "[CROSS-HH] %s ↔ %s social event triggered",
-                hh_a.name, hh_b.name,
+                hh_a.name,
+                hh_b.name,
             )
         except Exception as exc:
             logger.debug("Cross-household event failed: %s", exc)
@@ -1630,9 +2454,7 @@ class SimEngine:
                     continue
                 if getattr(sim, "_inheritance_done", False):
                     continue
-                children = [
-                    s for s in self.sims if sim.sim_id in s.parent_ids
-                ]
+                children = [s for s in self.sims if sim.sim_id in s.parent_ids]
                 if not children:
                     continue
                 share = sim.simoleons / len(children)
@@ -1640,15 +2462,19 @@ class SimEngine:
                     child.simoleons += share
                     child.emotion.add("relief", 0.5, duration=5, source="inheritance")
                     self.memory_store.write(
-                        child.sim_id, sim.sim_id,
+                        child.sim_id,
+                        sim.sim_id,
                         f"inherited simoleons from {sim.name}",
-                        0.6, tick=self._tick_count,
+                        0.6,
+                        tick=self._tick_count,
                     )
                 sim.simoleons = 0
                 sim._inheritance_done = True
                 logger.info(
                     "[INHERITANCE] %s distributed §%.0f to %d children",
-                    sim.name, share * len(children), len(children),
+                    sim.name,
+                    share * len(children),
+                    len(children),
                 )
         except Exception as exc:
             logger.debug("Inheritance check failed: %s", exc)
@@ -1658,18 +2484,18 @@ class SimEngine:
         month = 1 + (self._tick_count // 200) % 12  # 1 month per 200 ticks
 
         # Seasonal effects
-        if month in (12, 1, 2):   # winter
+        if month in (12, 1, 2):  # winter
             sim.needs.energy = max(0, sim.needs.energy - 0.15)
             sim.needs.social = max(0, sim.needs.social - 0.10)
         elif month in (6, 7, 8):  # summer
             sim.needs.fun = min(100, sim.needs.fun + 0.15)
 
         # Time-of-day effects
-        if 6 <= hour < 9:         # morning
+        if 6 <= hour < 9:  # morning
             sim.needs.energy = max(0, sim.needs.energy - 0.20)
-        elif 18 <= hour < 21:     # evening social/fun bonus
+        elif 18 <= hour < 21:  # evening social/fun bonus
             sim.needs.social = min(100, sim.needs.social + 0.10)
-            sim.needs.fun    = min(100, sim.needs.fun    + 0.10)
+            sim.needs.fun = min(100, sim.needs.fun + 0.10)
 
     def _check_jealousy(self, flirter: Sim, target: Sim, valence: float) -> None:
         """Detect jealousy in the target's existing partner when flirting fires."""
@@ -1680,25 +2506,771 @@ class SimEngine:
             if rel_with_target.romance < 80:
                 continue
             # This sim is target's partner — they may feel jealous
-            neuro  = sim.ocean.get("neuroticism", 0.5)
+            neuro = sim.ocean.get("neuroticism", 0.5)
             increase = 15 * neuro * max(0, valence)
-            rel_with_target.jealousy_score = min(100,
-                rel_with_target.jealousy_score + increase)
+            rel_with_target.jealousy_score = min(
+                100, rel_with_target.jealousy_score + increase
+            )
             if rel_with_target.jealousy_score > 50:
                 sim.emotion.add("annoyance", 0.7, duration=5, source="jealousy")
                 # Damage flirter-partner relationship
                 rel_with_flirter = self.relationships.get(sim.sim_id, flirter.sim_id)
                 rel_with_flirter.apply_deltas(-5, 0)
-                logger.info("[JEALOUSY] %s jealous of %s flirting with %s (score=%.0f)",
-                            sim.name, flirter.name, target.name,
-                            rel_with_target.jealousy_score)
+                logger.info(
+                    "[JEALOUSY] %s jealous of %s flirting with %s (score=%.0f)",
+                    sim.name,
+                    flirter.name,
+                    target.name,
+                    rel_with_target.jealousy_score,
+                )
             if rel_with_target.jealousy_score > 70:
                 # Romance damage on the primary relationship
                 rel_with_target.apply_deltas(-3, -5)
                 rel_with_target.jealousy_score = 50  # reset after consequence
 
+    def _process_gestation(self) -> None:
+        # Handled by self.pregnancy.tick() (PregnancySystem) in the new system.
+        pass
+
+    def _start_pregnancy(self, parent_a: Sim, parent_b: Sim) -> None:
+        # Redirect to the new 3-stage PregnancySystem.
+        # Guard: skip if already pregnant.
+        already = any(
+            rec.parent_a_id in (parent_a.sim_id, parent_b.sim_id)
+            for rec in self._pregnancies.values()
+        )
+        if not already:
+            self.pregnancy.begin(parent_a, parent_b, self)
+
+    def _try_adoption_event(self) -> None:
+        if len(self.sims) < 2 or random.random() > 0.08:
+            return
+        parents = random.sample(self.sims, 2)
+        if any(s.profile.get("age", 0) < 20 for s in parents):
+            return
+        rel = self.relationships.get(parents[0].sim_id, parents[1].sim_id)
+        family_intent = any(
+            s.profile.get("aspiration") == "Family"
+            or "family-oriented" in s.profile.get("traits", [])
+            for s in parents
+        )
+        if rel.friendship < 35 or not family_intent:
+            return
+        from identity.profile_factory import generate_sim_profile
+        from core.sim import Sim as SimClass
+
+        profile = generate_sim_profile()
+        profile["parent_ids"] = [parents[0].sim_id, parents[1].sim_id]
+        profile["age"] = random.randint(1, 10)
+        child = SimClass(profile)
+        child.simoleons = random.uniform(100, 350)
+        self.sims.append(child)
+        self._sim_lookup[child.sim_id] = child
+        if parents[0].household_id:
+            child.household_id = parents[0].household_id
+            for hh in self.households:
+                if hh.id == parents[0].household_id:
+                    hh.member_ids.append(child.sim_id)
+                    break
+        self._bus.emit(
+            "child_born",
+            child=child,
+            parent_a=parents[0],
+            parent_b=parents[1],
+            tick=self._tick_count,
+        )
+
+    def _process_illness_and_transmission(self) -> None:
+        for sim in self.sims:
+            if (
+                sim.health_status == "healthy"
+                and sim.needs.energy < 20
+                and random.random() < 0.04
+            ):
+                sim.health_status = "ill"
+                sim.illness_ticks_left = random.randint(3, 6)
+                sim.emotion.add("nervousness", 0.6, duration=4, source="illness")
+            elif sim.health_status == "ill":
+                sim.illness_ticks_left -= 1
+                sim.needs.energy = max(0, sim.needs.energy - 1.0)
+                if sim.illness_ticks_left <= 0:
+                    sim.health_status = "healthy"
+
+        for sim_a in self.sims:
+            if sim_a.health_status != "ill":
+                continue
+            for sim_b in self.sims:
+                if sim_a.sim_id == sim_b.sim_id or sim_b.health_status != "healthy":
+                    continue
+                same_home = (
+                    sim_a.household_id and sim_a.household_id == sim_b.household_id
+                )
+                rel = self.relationships.get(sim_a.sim_id, sim_b.sim_id)
+                close_contact = rel.friendship > 45
+                if (same_home or close_contact) and random.random() < 0.10:
+                    sim_b.health_status = "ill"
+                    sim_b.illness_ticks_left = random.randint(2, 5)
+
+    def _process_temperature_risk(self, hour: int) -> None:
+        month = 1 + (self._tick_count // 200) % 12
+        is_winter = month in (12, 1, 2)
+        is_summer = month in (6, 7, 8)
+        harsh_hour = hour < 6 or hour >= 22
+        for sim in self.sims:
+            risk_delta = 0.0
+            if is_winter and harsh_hour:
+                risk_delta += 0.22
+            if is_summer and 12 <= hour <= 16:
+                risk_delta += 0.22
+            if sim.household_id:
+                risk_delta -= 0.12
+            sim.temperature_risk = max(
+                0.0, min(1.0, sim.temperature_risk + risk_delta - 0.06)
+            )
+            if sim.temperature_risk > 0.7:
+                sim.needs.energy = max(0, sim.needs.energy - 2.0)
+                sim.emotion.add("discomfort", 0.5, duration=2, source="temperature")
+
+    def _run_gig_economy(self) -> None:
+        # Replaced by self.gigs (GigManager) — ticked in run_tick directly.
+        pass
+
+    def _run_property_system(self) -> None:
+        # Replaced by self.properties (PropertyManager) — ticked in run_tick directly.
+        pass
+
+    def _run_business_system(self) -> None:
+        business_defs = {
+            "retail": {
+                "buy": 5200.0,
+                "upkeep": 26.0,
+                "income": 54.0,
+                "skill": "charisma",
+            },
+            "restaurant": {
+                "buy": 6800.0,
+                "upkeep": 38.0,
+                "income": 72.0,
+                "skill": "cooking",
+            },
+            "vet": {"buy": 6100.0, "upkeep": 33.0, "income": 66.0, "skill": "logic"},
+        }
+        for sim in self.sims:
+            if (
+                len(sim.owned_businesses) < 1
+                and sim.simoleons > 7000
+                and random.random() < 0.03
+            ):
+                name = random.choice(list(business_defs.keys()))
+                cfg = business_defs[name]
+                sim.simoleons -= cfg["buy"]
+                sim.owned_businesses.append(name)
+            for biz in sim.owned_businesses:
+                cfg = business_defs.get(biz)
+                if not cfg:
+                    continue
+                skill_name = str(cfg["skill"])
+                skill_bonus = 1.0 + (sim.skills.levels.get(skill_name, 0) / 35.0)
+                net = cfg["income"] * skill_bonus - cfg["upkeep"]
+                sim.simoleons = max(0.0, sim.simoleons + net)
+
+    def _run_education_system(self) -> None:
+        hour = (GAME_START_HOUR + self._tick_count) % 24
+        for sim in self.sims:
+            age = int(sim.profile.get("age", 25))
+            if age > 17:
+                continue
+            school_time = 8 <= hour <= 14
+            if school_time:
+                growth = 0.35 + sim.skills.modifier("logic") * 0.4
+                fatigue_penalty = 0.4 if sim.needs.energy < 25 else 0.0
+                sim.school_performance = max(
+                    0.0,
+                    min(100.0, sim.school_performance + growth - fatigue_penalty),
+                )
+                sim.homework_progress = max(0.0, sim.homework_progress - 2.0)
+            elif 16 <= hour <= 21:
+                if random.random() < 0.45:
+                    sim.homework_progress = min(100.0, sim.homework_progress + 9.0)
+                    sim.skills.gain_xp("logic", 0.08)
+            if self._tick_count % 20 == 0 and sim.homework_progress < 35:
+                sim.school_performance = max(0.0, sim.school_performance - 3.0)
+                sim.emotion.add(
+                    "nervousness", 0.4, duration=3, source="school pressure"
+                )
+            sim.scholarship_points = min(
+                100.0,
+                sim.scholarship_points + (sim.school_performance / 1000.0),
+            )
+            sim.university_readiness = min(
+                100.0,
+                sim.university_readiness
+                + (sim.school_performance / 1200.0)
+                + (sim.skills.levels.get("logic", 0) / 500.0),
+            )
+
+    def _run_university_system(self) -> None:
+        majors = ["computer science", "fine arts", "biology", "business"]
+        for sim in self.sims:
+            age = int(sim.profile.get("age", 25))
+            if age < 18:
+                continue
+
+            if (
+                sim.university_status == "none"
+                and sim.university_readiness >= 55
+                and sim.scholarship_points >= 20
+                and random.random() < 0.06
+            ):
+                sim.university_status = "enrolled"
+                sim.degree_track = random.choice(majors)
+                sim.degree_progress = 0.0
+                sim.emotion.add(
+                    "optimism", 0.6, duration=6, source="university admission"
+                )
+
+            if sim.university_status != "enrolled":
+                continue
+
+            study_gain = 0.35 + sim.skills.modifier("logic") * 0.4
+            if sim.homework_progress >= 50:
+                study_gain += 0.15
+            sim.degree_progress = min(100.0, sim.degree_progress + study_gain)
+            sim.simoleons = max(0.0, sim.simoleons - 8.0)
+
+            if sim.degree_progress >= 100.0:
+                sim.university_status = "graduated"
+                sim.simoleons += 1200
+                sim.career_performance = min(100.0, sim.career_performance + 10.0)
+                sim.emotion.add("joy", 0.8, duration=8, source="graduation")
+
+    def _run_career_progression_system(self) -> None:
+        if self._tick_count % 6 != 0:
+            return
+        branch_map = {
+            "Software Engineer": ("startup", "enterprise"),
+            "Researcher": ("lab", "field"),
+            "Artist": ("commercial", "indie"),
+        }
+        for sim in self.sims:
+            if int(sim.profile.get("age", 25)) < 18:
+                continue
+
+            if sim.work_from_home_task is None and random.random() < 0.25:
+                sim.work_from_home_task = {
+                    "task": random.choice(
+                        ["file report", "client call", "prototype draft"]
+                    ),
+                    "due_tick": self._tick_count + random.randint(2, 4),
+                    "skill": random.choice(["logic", "charisma", "creativity"]),
+                }
+
+            task = sim.work_from_home_task
+            if task and self._tick_count >= int(task["due_tick"]):
+                level = sim.skills.levels.get(str(task["skill"]), 0)
+                if level >= 4:
+                    sim.career_performance = min(100.0, sim.career_performance + 4.0)
+                    sim.simoleons += 80
+                else:
+                    sim.career_performance = max(0.0, sim.career_performance - 2.0)
+                sim.work_from_home_task = None
+
+            if (
+                sim.career_performance < 18
+                and sim.career_level > 1
+                and random.random() < 0.35
+            ):
+                sim.career_level -= 1
+                sim.career_performance = 35.0
+                sim.emotion.add(
+                    "disappointment", 0.5, duration=4, source="career demotion"
+                )
+
+            if sim.career_performance >= 72:
+                sim.career_level = min(10, sim.career_level + 1)
+                sim.career_performance = max(45.0, sim.career_performance - 18.0)
+
+            if sim.career_level >= 5 and sim.career_branch == "base":
+                branches = branch_map.get(
+                    sim.profile.get("job", ""), ("specialist", "management")
+                )
+                sim.career_branch = random.choice(branches)
+
+            if sim.career_branch in {"startup", "field", "indie", "specialist"}:
+                sim.skills.gain_xp("creativity", 0.04)
+                sim.simoleons += 10
+            elif sim.career_branch in {"enterprise", "lab", "commercial", "management"}:
+                sim.skills.gain_xp("charisma", 0.04)
+                sim.simoleons += 12
+
+            if random.random() < 0.20:
+                good_outcome = random.random() < 0.62
+                if good_outcome:
+                    sim.career_performance = min(100.0, sim.career_performance + 2.5)
+                    sim.emotion.add("optimism", 0.3, duration=2, source="chance card")
+                else:
+                    sim.career_performance = max(0.0, sim.career_performance - 2.5)
+                    sim.emotion.add(
+                        "nervousness", 0.3, duration=2, source="chance card"
+                    )
+
+    def _run_occult_system(self) -> None:
+        occult_pool = ["vampire", "werewolf", "spellcaster"]
+        for sim in self.sims:
+            if sim.is_ghost:
+                continue
+            if sim.occult_type == "none" and random.random() < 0.003:
+                sim.occult_type = random.choice(occult_pool)
+                sim.occult_power = 10.0
+                if sim.occult_type == "vampire":
+                    sim.occult_perks = ["night_vision"]
+                    sim.occult_weaknesses = ["sunlight_frailty"]
+                elif sim.occult_type == "werewolf":
+                    sim.occult_perks = ["primal_strength"]
+                    sim.occult_weaknesses = ["lunar_rage"]
+                elif sim.occult_type == "spellcaster":
+                    sim.occult_perks = ["quick_channeling"]
+                    sim.occult_weaknesses = ["mana_drain"]
+                sim.emotion.add("surprise", 0.7, duration=5, source="occult awakening")
+
+            if sim.occult_type == "vampire":
+                sim.occult_power = min(100.0, sim.occult_power + 0.15)
+                sim.needs.energy = min(100.0, sim.needs.energy + 0.25)
+                sim.needs.hunger = max(0.0, sim.needs.hunger - 0.05)
+                if sim.temperature_risk > 0.8 and random.random() < 0.06:
+                    sim.needs.energy = max(0.0, sim.needs.energy - 8.0)
+            elif sim.occult_type == "werewolf":
+                sim.occult_power = min(100.0, sim.occult_power + 0.12)
+                sim.needs.fun = min(100.0, sim.needs.fun + 0.2)
+                if random.random() < 0.02:
+                    sim.emotion.add("anger", 0.5, duration=2, source="lunar agitation")
+            elif sim.occult_type == "spellcaster":
+                sim.occult_power = min(100.0, sim.occult_power + 0.18)
+                sim.skills.gain_xp("logic", 0.03)
+                sim.skills.gain_xp("creativity", 0.03)
+                if random.random() < 0.03:
+                    sim.needs.energy = max(0.0, sim.needs.energy - 2.5)
+
+            if sim.occult_power >= 35 and len(sim.occult_perks) < 2:
+                if sim.occult_type == "vampire":
+                    sim.occult_perks.append("mesmerize")
+                elif sim.occult_type == "werewolf":
+                    sim.occult_perks.append("keen_senses")
+                elif sim.occult_type == "spellcaster":
+                    sim.occult_perks.append("ritual_focus")
+            if sim.occult_power >= 60 and len(sim.occult_weaknesses) < 2:
+                if sim.occult_type == "vampire":
+                    sim.occult_weaknesses.append("thirst_instability")
+                elif sim.occult_type == "werewolf":
+                    sim.occult_weaknesses.append("feral_impulses")
+                elif sim.occult_type == "spellcaster":
+                    sim.occult_weaknesses.append("arcane_overload")
+
+    def _run_perk_progression(self) -> None:
+        perk_defs = {
+            "social_butterfly": lambda s: s.skills.levels.get("charisma", 0) >= 6,
+            "craft_master": lambda s: s.skills.levels.get("creativity", 0) >= 6,
+            "logic_strategist": lambda s: s.skills.levels.get("logic", 0) >= 6,
+            "fit_lifestyle": lambda s: s.skills.levels.get("fitness", 0) >= 6,
+            "culinary_instinct": lambda s: s.skills.levels.get("cooking", 0) >= 6,
+        }
+        for sim in self.sims:
+            level_total = int(sum(sim.skills.levels.values()))
+            if level_total - sim._last_perk_level_total >= 4:
+                sim.perk_points += 1
+                sim._last_perk_level_total = level_total
+            if sim.perk_points > 0:
+                for perk, condition in perk_defs.items():
+                    if perk not in sim.perks and condition(sim):
+                        sim.perks.add(perk)
+                        sim.perk_points -= 1
+                        break
+
+    def _process_phone_actions(self) -> None:
+        for sim in self.sims:
+            if random.random() < 0.10 and len(self.sims) > 1:
+                target = random.choice([s for s in self.sims if s.sim_id != sim.sim_id])
+                sim.pending_phone_actions.append(
+                    {
+                        "target_id": target.sim_id,
+                        "type": random.choice(["text", "call", "invite"]),
+                        "resolve_at": self._tick_count + random.randint(1, 3),
+                    }
+                )
+            carry: list[dict[str, object]] = []
+            for action in sim.pending_phone_actions:
+                resolve_at = int(action["resolve_at"])
+                if self._tick_count < resolve_at:
+                    carry.append(action)
+                    continue
+                target = self._sim_lookup.get(str(action["target_id"]))
+                if not target:
+                    continue
+                rel = self.relationships.get(sim.sim_id, target.sim_id)
+                delta = {"text": 1.5, "call": 2.0, "invite": 2.5}.get(
+                    str(action["type"]), 1.0
+                )
+                rel.apply_deltas(delta, 0)
+                if str(action["type"]) == "invite" and random.random() < 0.65:
+                    invite = {
+                        "from_id": sim.sim_id,
+                        "to_id": target.sim_id,
+                        "type": "hangout",
+                        "respond_by": self._tick_count + 2,
+                        "status": "pending",
+                    }
+                    target.pending_invitations.append(invite)
+            sim.pending_phone_actions = carry
+
+    def _process_family_planning(self) -> None:
+        carry: list[dict[str, str | int]] = []
+        for intent in self._try_for_baby_intents:
+            resolve_at = int(intent["resolve_at"])
+            if self._tick_count < resolve_at:
+                carry.append(intent)
+                continue
+            parent_a = self._sim_lookup.get(str(intent["parent_a_id"]))
+            parent_b = self._sim_lookup.get(str(intent["parent_b_id"]))
+            if not parent_a or not parent_b:
+                continue
+            rel = self.relationships.get(parent_a.sim_id, parent_b.sim_id)
+            chance = 0.38 if rel.romance >= 80 else 0.22
+            if random.random() < chance:
+                self._start_pregnancy(parent_a, parent_b)
+            else:
+                parent_a.emotion.add(
+                    "disappointment", 0.4, duration=3, source="family planning"
+                )
+                parent_b.emotion.add(
+                    "disappointment", 0.4, duration=3, source="family planning"
+                )
+        self._try_for_baby_intents = carry
+
+    def _run_custody_schedule(self) -> None:
+        if self._tick_count % 7 != 0:
+            return
+        for child_id, info in self._custody.items():
+            child = self._sim_lookup.get(child_id)
+            if not child:
+                continue
+            primary = str(info.get("primary", ""))
+            parent_a_id = str(info.get("parent_a", ""))
+            parent_b_id = str(info.get("parent_b", ""))
+            visiting_parent_id = (
+                parent_b_id
+                if child.household_id == primary and parent_b_id
+                else parent_a_id
+            )
+            visiting_parent = self._sim_lookup.get(visiting_parent_id)
+            if not visiting_parent:
+                continue
+            rel = self.relationships.get(child.sim_id, visiting_parent.sim_id)
+            rel.apply_deltas(2.5, 0)
+            child.needs.restore("social", 6)
+
+    def _run_odd_jobs(self) -> None:
+        for sim in self.sims:
+            if (
+                sim.active_odd_job is None
+                and sim.simoleons < 900
+                and random.random() < 0.16
+            ):
+                sim.active_odd_job = {
+                    "title": random.choice(
+                        ["pet sitting", "delivery run", "yard cleanup", "moving help"]
+                    ),
+                    "deadline": self._tick_count + random.randint(1, 3),
+                    "payout": random.randint(45, 120),
+                    "difficulty": random.randint(1, 5),
+                    "skill": random.choice(["fitness", "charisma", "logic"]),
+                }
+            odd_job = sim.active_odd_job
+            if not odd_job:
+                continue
+            if self._tick_count < int(odd_job["deadline"]):
+                continue
+            skill_level = sim.skills.levels.get(str(odd_job["skill"]), 0)
+            base_payout = float(odd_job["payout"])
+            payout = (
+                base_payout
+                if skill_level >= float(odd_job["difficulty"])
+                else base_payout * 0.6
+            )
+            sim.simoleons += payout
+            sim.odd_job_reputation = min(
+                100.0, sim.odd_job_reputation + (2.0 if payout >= base_payout else 0.8)
+            )
+            sim.active_odd_job = None
+
+    def _process_bills_and_household_expenses(self) -> None:
+        if self._tick_count % 12 != 0:
+            return
+        for hh in self.households:
+            members = [s for s in self.sims if s.sim_id in hh.member_ids]
+            if not members:
+                continue
+            property_count = sum(len(s.properties) for s in members)
+            bill = 80 + 20 * len(members) + 35 * property_count
+            if hh.funds >= bill:
+                hh.funds -= bill
+            else:
+                remaining = bill - hh.funds
+                hh.funds = 0.0
+                split = remaining / len(members)
+                for sim in members:
+                    sim.simoleons = max(0.0, sim.simoleons - split)
+                    if sim.simoleons < 150:
+                        sim.emotion.add("nervousness", 0.5, duration=4, source="bills")
+
+    def _run_calendar_events(self) -> None:
+        for sim in self.sims:
+            kept_invites = []
+            for invite in sim.pending_invitations:
+                if invite.get("status") != "pending":
+                    continue
+                respond_by = int(invite.get("respond_by", 0))
+                if self._tick_count < respond_by:
+                    kept_invites.append(invite)
+                    continue
+                sender = self._sim_lookup.get(str(invite.get("from_id", "")))
+                if sender is None:
+                    continue
+                accept = random.random() < 0.68
+                if accept:
+                    self._calendar_events.append(
+                        {
+                            "type": str(invite.get("type", "hangout")),
+                            "host_id": sender.sim_id,
+                            "guest_id": sim.sim_id,
+                            "scheduled_tick": self._tick_count + random.randint(1, 3),
+                            "status": "scheduled",
+                        }
+                    )
+                else:
+                    rel = self.relationships.get(sender.sim_id, sim.sim_id)
+                    rel.apply_deltas(-1.5, 0.0)
+            sim.pending_invitations = kept_invites
+
+        for evt in self._calendar_events:
+            if evt.get("status") != "scheduled":
+                continue
+            when = int(evt.get("scheduled_tick", 0))
+            if self._tick_count < when:
+                continue
+            host = self._sim_lookup.get(str(evt.get("host_id", "")))
+            guest = self._sim_lookup.get(str(evt.get("guest_id", "")))
+            if host and guest:
+                rel = self.relationships.get(host.sim_id, guest.sim_id)
+                rel.apply_deltas(4.0, 1.0)
+                host.needs.restore("fun", 6)
+                guest.needs.restore("fun", 6)
+                self._bus.emit(
+                    "calendar_event",
+                    event_type=str(evt.get("type", "hangout")),
+                    host=host,
+                    guest=guest,
+                    tick=self._tick_count,
+                )
+            evt["status"] = "completed"
+
+        self._calendar_events = [
+            evt
+            for evt in self._calendar_events
+            if not (
+                evt.get("status") == "completed"
+                and self._tick_count - int(evt.get("scheduled_tick", 0)) > 20
+            )
+        ]
+
+    def _run_travel_system(self) -> None:
+        destinations = ["Sulani", "Mt. Komorebi", "San Myshuno", "Henford"]
+        for sim in self.sims:
+            if random.random() < 0.02 and sim.simoleons >= 120:
+                place = random.choice(destinations)
+                sim.simoleons -= 120
+                sim.travel_history.append(place)
+                sim.needs.fun = min(100.0, sim.needs.fun + 10.0)
+                sim.emotion.add("joy", 0.4, duration=3, source="travel")
+                if "travel" in sim.profile.get("interests", []):
+                    sim.skills.gain_xp("charisma", 0.05)
+
+    def _run_pet_system(self) -> None:
+        species = ["dog", "cat"]
+        for sim in self.sims:
+            if (
+                len(sim.pet_ids) == 0
+                and sim.simoleons > 1400
+                and random.random() < 0.015
+            ):
+                pet_id = f"pet_{sim.sim_id}_{self._tick_count}"
+                pet_kind = random.choice(species)
+                sim.pet_ids.append(f"{pet_kind}:{pet_id}")
+                sim.simoleons -= 180
+            if sim.pet_ids:
+                sim.needs.social = min(100.0, sim.needs.social + 0.35)
+                sim.needs.fun = min(100.0, sim.needs.fun + 0.25)
+                if random.random() < 0.03:
+                    sim.simoleons = max(0.0, sim.simoleons - 15.0)
+
+    def _process_survival_hazards(self) -> None:
+        venue_name = str(self._venue.get("name", ""))
+        for sim in self.sims:
+            if sim.is_ghost:
+                sim.hazard_flags = {
+                    "fire": 0.0,
+                    "electrocution": 0.0,
+                    "starvation": 0.0,
+                    "drowning": 0.0,
+                    "weather_extreme": 0.0,
+                }
+                continue
+
+            if sim.needs.hunger <= 2:
+                sim._starvation_ticks += 1
+            else:
+                sim._starvation_ticks = max(0, sim._starvation_ticks - 1)
+            sim.hazard_flags["starvation"] = min(1.0, sim._starvation_ticks / 4.0)
+            if sim._starvation_ticks >= 4 and not getattr(sim, "_death_queued", False):
+                sim._death_queued = True
+                self._queue_death(sim)
+                self._bus.emit(
+                    "hazard_event", hazard="starvation", sim=sim, tick=self._tick_count
+                )
+                continue
+
+            pool_venue = venue_name in {"park", "gym"}
+            if pool_venue and random.random() < 0.025 and sim.needs.energy < 30:
+                sim._drowning_ticks += 1
+            else:
+                sim._drowning_ticks = max(0, sim._drowning_ticks - 1)
+            sim.hazard_flags["drowning"] = min(1.0, sim._drowning_ticks / 4.0)
+            if sim._drowning_ticks >= 4:
+                if random.random() < 0.35 and not getattr(sim, "_death_queued", False):
+                    sim._death_queued = True
+                    self._queue_death(sim)
+                else:
+                    sim.needs.energy = max(0.0, sim.needs.energy - 18.0)
+                    sim.emotion.add("fear", 0.8, duration=4, source="near drowning")
+                sim._drowning_ticks = 1
+                self._bus.emit(
+                    "hazard_event", hazard="drowning", sim=sim, tick=self._tick_count
+                )
+
+            near_fire = venue_name in {"home (1:1)", "house party", "restaurant"}
+            if near_fire and random.random() < 0.03:
+                sim._near_fire_ticks += 1
+            else:
+                sim._near_fire_ticks = max(0, sim._near_fire_ticks - 1)
+            sim.hazard_flags["fire"] = min(1.0, sim._near_fire_ticks / 5.0)
+            if sim._near_fire_ticks >= 5:
+                sim.needs.energy = max(0.0, sim.needs.energy - 15.0)
+                sim.emotion.add("fear", 0.8, duration=4, source="fire hazard")
+                sim._near_fire_ticks = 1
+                self._bus.emit(
+                    "hazard_event", hazard="fire", sim=sim, tick=self._tick_count
+                )
+
+            month = 1 + (self._tick_count // 200) % 12
+            weather_risk = 0.0
+            if month in (12, 1, 2) and sim.temperature_risk > 0.75:
+                weather_risk = 0.6
+            elif month in (6, 7, 8) and sim.temperature_risk > 0.8:
+                weather_risk = 0.6
+            sim.hazard_flags["weather_extreme"] = weather_risk
+            if weather_risk > 0 and random.random() < 0.08:
+                sim.needs.energy = max(0.0, sim.needs.energy - 10.0)
+                if random.random() < 0.18 and not getattr(sim, "_death_queued", False):
+                    sim._death_queued = True
+                    self._queue_death(sim)
+                self._bus.emit(
+                    "hazard_event",
+                    hazard="weather_extreme",
+                    sim=sim,
+                    tick=self._tick_count,
+                )
+
+            electrical_job = sim.profile.get("job", "") in {
+                "Software Engineer",
+                "Researcher",
+            }
+            elec_risk = 0.0
+            if electrical_job and sim.needs.energy < 25:
+                elec_risk = 0.35
+            if electrical_job and random.random() < 0.01 and sim.needs.energy < 18:
+                sim.needs.energy = max(0.0, sim.needs.energy - 25.0)
+                sim.emotion.add("fear", 0.7, duration=3, source="electrocution")
+                if random.random() < 0.22 and not getattr(sim, "_death_queued", False):
+                    sim._death_queued = True
+                    self._queue_death(sim)
+                self._bus.emit(
+                    "hazard_event",
+                    hazard="electrocution",
+                    sim=sim,
+                    tick=self._tick_count,
+                )
+            sim.hazard_flags["electrocution"] = elec_risk
+
+    def _trigger_divorce(self, sim_a: Sim, sim_b: Sim) -> None:
+        if not sim_a.household_id or sim_a.household_id != sim_b.household_id:
+            return
+        household = next(
+            (h for h in self.households if h.id == sim_a.household_id), None
+        )
+        if household is None:
+            return
+
+        split_funds = (
+            household.funds
+            if household.funds > 0
+            else (sim_a.simoleons + sim_b.simoleons)
+        )
+        share = split_funds * 0.5
+        sim_a.simoleons = share
+        sim_b.simoleons = share
+        household.funds = 0.0
+
+        new_id = f"{household.id}_split_{self._tick_count}"
+        new_household = type(household)(
+            id=new_id,
+            name=f"{sim_b.name.split()[0]} household",
+            member_ids=[sim_b.sim_id],
+            funds=share,
+        )
+        self.households.append(new_household)
+        sim_b.household_id = new_id
+        household.member_ids = [
+            mid for mid in household.member_ids if mid != sim_b.sim_id
+        ]
+
+        children = [
+            s
+            for s in self.sims
+            if sim_a.sim_id in s.parent_ids and sim_b.sim_id in s.parent_ids
+        ]
+        for child in children:
+            stays_with_a = random.random() < 0.5
+            child.household_id = (
+                sim_a.household_id if stays_with_a else sim_b.household_id
+            )
+            self._custody[child.sim_id] = {
+                "parent_a": sim_a.sim_id,
+                "parent_b": sim_b.sim_id,
+                "primary": child.household_id,
+            }
+
+        rel = self.relationships.get(sim_a.sim_id, sim_b.sim_id)
+        rel.apply_deltas(-30, -50)
+        sim_a.emotion.add("grief", 0.7, duration=7, source="divorce")
+        sim_b.emotion.add("grief", 0.7, duration=7, source="divorce")
+
     def _apply_gift_outcome(self, giver: Sim, receiver: Sim, result: dict) -> None:
         """Apply friendship bonus based on gift interest-match."""
+        if giver.inventory:
+            gifted_item = giver.inventory.pop(0)
+            receiver.inventory.append(gifted_item)
+        else:
+            gifted_item = "thoughtful note"
+
         giver_interests = set(giver.profile.get("interests", []))
         receiver_interests = set(receiver.profile.get("interests", []))
         match = bool(giver_interests & receiver_interests)
@@ -1711,7 +3283,14 @@ class SimEngine:
 
         rel = self.relationships.get(giver.sim_id, receiver.sim_id)
         rel.apply_deltas(bonus, bonus * 0.3)
-        logger.info("[GIFT] %s→%s match=%s bonus=+%.1f", giver.name, receiver.name, match, bonus)
+        logger.info(
+            "[GIFT] %s→%s item=%s match=%s bonus=+%.1f",
+            giver.name,
+            receiver.name,
+            gifted_item,
+            match,
+            bonus,
+        )
 
     def _run_mentor_session(self, mentor: Sim, mentee: Sim) -> None:
         """Fire a mentoring interaction when skill gap >= 4."""
@@ -1736,9 +3315,16 @@ class SimEngine:
         mentee.skills.gain_xp(gap_skill, 0.5)
         mentor.skills.gain_xp("charisma", 0.3)
         rel.apply_deltas(3, 0)
-        logger.info("[MENTOR] %s teaches %s +0.5 %s", mentor.name, mentee.name, gap_skill)
-        self._bus.emit("mentor_session", mentor=mentor, mentee=mentee,
-                       skill=gap_skill, tick=self._tick_count)
+        logger.info(
+            "[MENTOR] %s teaches %s +0.5 %s", mentor.name, mentee.name, gap_skill
+        )
+        self._bus.emit(
+            "mentor_session",
+            mentor=mentor,
+            mentee=mentee,
+            skill=gap_skill,
+            tick=self._tick_count,
+        )
 
     def _on_tick_complete(self, **_: Any) -> None:
         pass

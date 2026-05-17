@@ -114,7 +114,7 @@ class OllamaBackend:
         url: str | None = None,
         timeout: int | None = None,
     ):
-        self._model = model or os.environ.get("SIM_V2_OLLAMA_MODEL", "qwen3.5:9b")
+        self._model = model or os.environ.get("SIM_V2_OLLAMA_MODEL", "qwen2.5:3b")
         self._url = url or os.environ.get(
             "SIM_V2_OLLAMA_URL", "http://localhost:11434/api/chat"
         )
@@ -148,6 +148,9 @@ class OllamaBackend:
         response.raise_for_status()
         data = response.json()
         text = (data.get("message") or {}).get("content", "")
+        # Ollama returns exact token counts — stash them for the timing store
+        self._last_prompt_tokens = data.get("prompt_eval_count", 0)
+        self._last_output_tokens = data.get("eval_count", 0)
         return _THINK_RE.sub("", text).strip()
 
 
@@ -174,10 +177,12 @@ class LlamaServerBackend:
         temperature: float = 0.7,
         schema: dict | None = None,
     ) -> str:
+        from config import GGUF_USE_NO_THINK
+        user_content = f"{user}\n/no_think" if GGUF_USE_NO_THINK else user
         payload: dict = {
             "messages": [
                 {"role": "system", "content": system},
-                {"role": "user", "content": f"{user}\n/no_think"},
+                {"role": "user", "content": user_content},
             ],
             "temperature": temperature,
             "max_tokens": max_tokens,

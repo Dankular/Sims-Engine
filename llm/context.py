@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from typing import Any, TYPE_CHECKING
 
 from llm.adjudicator import ADJUDICATOR_SYSTEM_BASE
@@ -13,6 +14,38 @@ if TYPE_CHECKING:
 
 _DIALOGUE_BUFFER_MAX_TURNS = 4   # inject at most this many prior turns
 _DIALOGUE_STALE_TICKS      = 12  # turns older than this are dropped
+
+# GoEmotions (27 labels) → empathetic dataset labels (32 labels)
+_GOEMO_TO_EMPATH: dict[str, str] = {
+    "admiration":    "impressed",
+    "amusement":     "joyful",
+    "anger":         "angry",
+    "annoyance":     "annoyed",
+    "approval":      "content",
+    "caring":        "caring",
+    "confusion":     "apprehensive",
+    "curiosity":     "anticipating",
+    "desire":        "anticipating",
+    "disappointment":"disappointed",
+    "disapproval":   "disgusted",
+    "disgust":       "disgusted",
+    "embarrassment": "embarrassed",
+    "excitement":    "excited",
+    "fear":          "afraid",
+    "gratitude":     "grateful",
+    "grief":         "devastated",
+    "joy":           "joyful",
+    "love":          "caring",
+    "nervousness":   "anxious",
+    "optimism":      "hopeful",
+    "pride":         "proud",
+    "realization":   "surprised",
+    "relief":        "content",
+    "remorse":       "guilty",
+    "sadness":       "sad",
+    "surprise":      "surprised",
+    "neutral":       "content",
+}
 
 
 def get_interaction_context(
@@ -108,6 +141,58 @@ def get_interaction_context(
         examples = get_persona_examples(sim_a.ocean, n=2)
         if examples:
             parts.append("PERSONA EXAMPLES for Sim A's voice:\n" + "\n".join(examples))
+
+    # ── Empathetic situational utterance (matches sim A's dominant emotion) ───
+    # Skip for neutral — no emotional context to ground; also skip for content/prepared
+    # (generic states that produce mundane/off-topic utterances from this dataset)
+    _SKIP_EMPATH = {"neutral", "content", "prepared"}
+    if (
+        datasets
+        and getattr(datasets, "empath_index", None)
+        and sim_a.emotion.dominant not in _SKIP_EMPATH
+    ):
+        try:
+            from datasets.empathetic import sample_empathetic_utterance
+            empath_label = _GOEMO_TO_EMPATH.get(sim_a.emotion.dominant, "content")
+            pool = datasets.empath_index.get(empath_label, [])
+            if not pool:
+                pool = [u for v in datasets.empath_index.values() for u in v]
+            # Filter: clean encoding artifacts, require length ≥ 60, real sentence
+            clean_pool = []
+            for u in pool:
+                c = u.replace("_comma_", ",").replace("_period_", ".").strip()
+                if len(c) >= 60 and c[0].isupper() and not c.startswith("I am ok"):
+                    clean_pool.append(c)
+            if clean_pool:
+                utt = random.choice(clean_pool)
+                parts.append(
+                    f"EMPATHETIC CONTEXT ({sim_a.emotion.dominant}): {utt[:140]}"
+                )
+        except Exception:
+            pass
+
+    # ── Dialogue situational example — keyword-matched to the interaction ─────
+    if datasets and getattr(datasets, "dialogue_actions", None):
+        try:
+            pool = datasets.dialogue_actions
+            # Score by keyword overlap with the interaction phrase
+            kw = set(w.lower() for w in interaction.split() if len(w) > 3)
+            if kw:
+                scored = sorted(
+                    pool,
+                    key=lambda s: sum(w in s.lower() for w in kw),
+                    reverse=True,
+                )
+                # Take the top 20 matches, pick one; fall back to length-filtered random
+                top = [s for s in scored[:20] if len(s) >= 50]
+            else:
+                top = []
+            if not top:
+                top = [s for s in pool if len(s) >= 50]
+            if top:
+                parts.append(f"SITUATIONAL EXAMPLE: {random.choice(top)[:140]}")
+        except Exception:
+            pass
 
     return "\n".join(parts)
 
