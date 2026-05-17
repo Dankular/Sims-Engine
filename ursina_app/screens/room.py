@@ -32,7 +32,7 @@ from typing import Callable
 from ursina import (
     Entity, Text, Button, InputField, Vec2, Vec3,
     color, camera, window, destroy, scene, time,
-    mouse, held_keys, input,
+    mouse, held_keys,
 )
 from ursina.prefabs.panel import Panel
 

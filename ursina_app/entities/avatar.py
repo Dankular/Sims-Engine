@@ -86,8 +86,8 @@ class SimAvatar(Entity):
         )
 
         # Head (lighter shade, smaller)
-        lighter = color.color(
-            avatar_color.h, avatar_color.s * 0.6, min(1.0, avatar_color.v * 1.3)
+        lighter = color.Color(
+            avatar_color.h, avatar_color.s * 0.6, min(1.0, avatar_color.v * 1.3), 1.0
         )
         self._head = Entity(
             model="cube",
@@ -137,7 +137,7 @@ class SimAvatar(Entity):
 
     def set_color(self, col: color) -> None:
         self.color = col
-        lighter = color.color(col.h, col.s * 0.6, min(1.0, col.v * 1.3))
+        lighter = color.Color(col.h, col.s * 0.6, min(1.0, col.v * 1.3), 1.0)
         self._head.color = lighter
 
     # ── Ursina update ──────────────────────────────────────────────────────────
