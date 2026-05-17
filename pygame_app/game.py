@@ -1,9 +1,9 @@
 """
-pygame_app/game.py — Game state + loop orchestration.
+pygame_app/game.py — Game loop orchestration for the information-rich dashboard.
 
-Wires SimEngine to the pygame render/event loop. run_tick() is called
-on a configurable timer; TTS synthesis runs in a daemon thread so it
-never blocks a frame.
+Supports both:
+  - Tick-based: engine.run_tick() on a timer
+  - Real-time:  rt.update() every frame (pass realtime=True)
 """
 from __future__ import annotations
 
@@ -13,52 +13,61 @@ from typing import TYPE_CHECKING
 
 import pygame
 
+from pygame_app import colors as C
+
 if TYPE_CHECKING:
     from engine.engine import SimEngine
+    from engine.realtime import RealtimeSimEngine
     from tts.engine import TTSEngine
-    from narrative.story_runner import StoryRunner
 
-SPEEDS = [0.25, 0.5, 1.0, 2.0, 4.0]   # ticks per real second
+SPEEDS = [0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
 
 
 class Game:
-    W, H = 1280, 720
+    W, H = 1600, 900
 
     def __init__(
         self,
         engine: "SimEngine",
-        tts: "TTSEngine | None" = None,
-        story_runner: "StoryRunner | None" = None,
+        tts:    "TTSEngine | None"       = None,
+        rt:     "RealtimeSimEngine | None" = None,
     ):
-        self.engine = engine
-        self.tts = tts
-        self.story_runner = story_runner
+        self.engine  = engine
+        self.tts     = tts
+        self._rt     = rt          # non-None → realtime mode
 
-        self.running = True
-        self.paused = False
-        self._speed_idx = 2            # index into SPEEDS; default 1.0 t/s
-        self._accum = 0.0              # time since last tick (seconds)
+        self.running  = True
+        self.paused   = False
+        self._speed_idx = 3        # index into SPEEDS (default 1.0 t/s)
+        self._accum   = 0.0
+        self._tab_sims: list[str] = []
+        self._tab_idx  = 0
 
-        # Last engine snapshot — updated once per tick
-        self._state: dict = engine.get_state()
+        self.state: dict = engine.get_state()
+        self.selected_sim_id: str | None = None
 
-        # Event log: list of dicts {icon, text, tick}
-        self._event_log: list[dict] = []
+        # Event feed (displayed in live-feed panel)
+        self.event_log: list[dict]  = []      # list of {icon, text, colour, sub}
 
-        # Story segments queue: {speaker, text}
-        self._story_segments: list[dict] = []
-        self._tts_queue: queue.Queue = queue.Queue()
+        # Valence sparkline data
+        self.valence_history: list[float] = []
+
+        # Last model trace for the bottom panel
+        self.last_model_trace: list[tuple] = []
+
+        # TTS
+        self._tts_queue = queue.Queue()
         self._tts_thread = threading.Thread(target=self._tts_worker, daemon=True)
         self._tts_thread.start()
 
-        # Selected sim id
-        self.selected_sim_id: str | None = None
-
         # Subscribe to engine events
-        engine._bus.on("interaction_resolved", self._on_interaction)
+        engine._bus.on("interaction_queued",   self._on_queued)
+        engine._bus.on("interaction_resolved", self._on_resolved)
         engine._bus.on("career_event",         self._on_career)
-        engine._bus.on("life_event",            self._on_life)
-        engine._bus.on("child_born",            self._on_child_born)
+        engine._bus.on("life_event",           self._on_life)
+        engine._bus.on("child_born",           self._on_child_born)
+        engine._bus.on("stage_transition",     self._on_stage)
+        engine._bus.on("sim_died",             self._on_died)
 
     # ── Properties ────────────────────────────────────────────────────────────
 
@@ -66,128 +75,221 @@ class Game:
     def speed(self) -> float:
         return SPEEDS[self._speed_idx]
 
-    @property
-    def tick_interval(self) -> float:
-        return 1.0 / self.speed
-
     # ── Main loop ─────────────────────────────────────────────────────────────
 
     def run(self, renderer) -> None:
         clock = pygame.time.Clock()
         while self.running:
             dt = clock.tick(60) / 1000.0
+            self._handle_events(renderer)
 
-            self._handle_pygame_events()
-
-            if not self.paused:
-                self._accum += dt
-                if self._accum >= self.tick_interval:
-                    self._accum -= self.tick_interval
-                    self.engine.run_tick()
-                    self._state = self.engine.get_state()
+            if self._rt:
+                # Real-time mode: update engine every frame
+                if not self.paused:
+                    self._rt.update()
+                self.state = self._rt.get_state()
+            else:
+                # Tick mode: accumulate and fire
+                if not self.paused:
+                    self._accum += dt * self.speed
+                    if self._accum >= 1.0:
+                        self._accum -= 1.0
+                        self.engine.run_tick()
+                self.state = self.engine.get_state()
 
             renderer.draw(self)
             pygame.display.flip()
 
-    # ── Input ─────────────────────────────────────────────────────────────────
+    # ── Input handling ────────────────────────────────────────────────────────
 
-    def set_renderer(self, renderer) -> None:
-        self._renderer = renderer
-
-    def _handle_pygame_events(self) -> None:
+    def _handle_events(self, renderer) -> None:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
 
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
+                k = event.key
+                if k == pygame.K_ESCAPE:
                     self.running = False
-                elif event.key == pygame.K_SPACE:
+                elif k == pygame.K_SPACE:
                     self.paused = not self.paused
-                elif event.key == pygame.K_n:
+                elif k == pygame.K_n and not self._rt:
                     self.engine.run_tick()
-                    self._state = self.engine.get_state()
+                    self.state = self.engine.get_state()
                     self._accum = 0.0
-                elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
-                    self._speed_idx = min(len(SPEEDS) - 1, self._speed_idx + 1)
-                elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
-                    self._speed_idx = max(0, self._speed_idx - 1)
-                elif event.key == pygame.K_s:
-                    self._toggle_story()
+                elif k in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
+                    if self._rt:
+                        self._rt.set_speed(self._rt.clock.speed * 2)
+                    else:
+                        self._speed_idx = min(len(SPEEDS) - 1, self._speed_idx + 1)
+                elif k in (pygame.K_MINUS, pygame.K_KP_MINUS):
+                    if self._rt:
+                        self._rt.set_speed(max(1, self._rt.clock.speed / 2))
+                    else:
+                        self._speed_idx = max(0, self._speed_idx - 1)
+                elif k == pygame.K_TAB:
+                    self._cycle_focus()
 
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if hasattr(self, "_renderer"):
-                    self._renderer.handle_click(event.pos, self)
+                renderer.handle_click(event.pos, self)
 
-    def _toggle_story(self) -> None:
-        # Story mode toggle: attach/detach StoryRunner
-        pass
+    def _cycle_focus(self) -> None:
+        sims = self.state.get("sims", [])
+        ids  = [s["id"] for s in sims]
+        if not ids:
+            return
+        if self.selected_sim_id not in ids:
+            self._tab_idx = 0
+        else:
+            self._tab_idx = (ids.index(self.selected_sim_id) + 1) % len(ids)
+        self.selected_sim_id = ids[self._tab_idx]
 
     # ── Engine event callbacks ────────────────────────────────────────────────
 
-    def _on_interaction(self, **kw) -> None:
-        result = kw.get("result", {})
-        sim_a = kw["sim_a"]
-        sim_b = kw["sim_b"]
-        valence = float(kw.get("valence", 0))
-        memory = result.get("memory_tag", "")
-        fd = float(result.get("friendship_delta", 0))
-        rd = float(result.get("romance_delta", 0))
+    def _on_queued(self, **kw) -> None:
+        sim_a  = kw["sim_a"]
+        sim_b  = kw["sim_b"]
         action = kw.get("interaction", "")
         self._add_event(
-            "⚡",
-            f"{sim_a.name} → {sim_b.name} [{action}]  "
-            f"F:{fd:+.0f} R:{rd:+.0f}  \"{memory}\"",
-            kw.get("tick", 0),
+            "⚡", f"{sim_a.name} → {sim_b.name}  [{action[:40]}]",
+            C.TEXT_DIM,
         )
-        reaction = result.get("sim_b_reaction", "")
+
+    def _on_resolved(self, **kw) -> None:
+        result  = kw.get("result", {})
+        sim_a   = kw["sim_a"]
+        sim_b   = kw["sim_b"]
+        valence = float(kw.get("valence", 0))
+        action  = kw.get("interaction", "")
+        fd      = float(result.get("friendship_delta", 0))
+        rd      = float(result.get("romance_delta", 0))
+        memory  = result.get("memory_tag", "")
+        reaction= result.get("sim_b_reaction", "")
+        emo_a   = result.get("emotion_a", "")
+        emo_b   = result.get("emotion_b", "")
+
+        self.valence_history.append(valence)
+        if len(self.valence_history) > 200:
+            self.valence_history = self.valence_history[-200:]
+
+        v_col = C.VALENCE_POS if valence > 0.15 else C.VALENCE_NEG if valence < -0.15 else C.VALENCE_NEU
+
+        sub = []
         if reaction:
-            self._add_event("  ", f"{sim_b.name}: \"{reaction}\"", kw.get("tick", 0))
+            sub.append((f'"{reaction[:60]}"', C.TEXT_DIM))
+        sub.append((
+            f"F:{fd:+.1f}  R:{rd:+.1f}  Val:{valence:+.2f}",
+            v_col,
+        ))
+        if emo_a or emo_b:
+            sub.append((f"Emo: {sim_a.name}→{emo_a}  {sim_b.name}→{emo_b}", C.TEXT_DIM))
+        if memory:
+            sub.append((f"Mem: {memory[:50]}", C.TEXT_GHOST))
+
+        self._add_event(
+            "✅", f"{sim_a.name} → {sim_b.name}  [{action[:36]}]",
+            v_col, sub=sub,
+        )
+
+        # Update model trace panel
+        self.last_model_trace = self._build_model_trace(result, valence)
+
+        # TTS
+        if reaction and self.tts:
+            self.queue_tts(sim_b.name, reaction, emotion=emo_b)
+
+    def _build_model_trace(self, result: dict, valence: float) -> list[tuple]:
+        """Extract model contribution signals from the result dict."""
+        trace: list[tuple] = []
+        trace.append(("Valence", f"{valence:+.3f}", C.valence_colour_norm(valence + 0.5) if hasattr(C, 'valence_colour_norm') else C.VALENCE_NEU))
+        if result.get("emotion_a"):
+            trace.append(("GoEmo A", result["emotion_a"], C.emotion_colour(result["emotion_a"])))
+        if result.get("emotion_b"):
+            trace.append(("GoEmo B", result["emotion_b"], C.emotion_colour(result["emotion_b"])))
+        if result.get("memory_tag"):
+            trace.append(("Memory", result["memory_tag"][:40], C.TEXT_DIM))
         if result.get("reasoning"):
-            self._add_story_event(result.get("reasoning", ""), is_narrator=True)
+            trace.append(("Reason", result["reasoning"][:60], C.TEXT_GHOST))
+        fd = float(result.get("friendship_delta", 0))
+        if abs(fd) > 0:
+            fc = C.VALENCE_POS if fd > 0 else C.VALENCE_NEG
+            trace.append(("Friendship Δ", f"{fd:+.1f}", fc))
+        return trace
 
     def _on_career(self, **kw) -> None:
         result = kw.get("result", {})
+        sim    = kw["sim"]
+        delta  = result.get("performance_delta", 0)
+        col    = C.VALENCE_POS if delta >= 0 else C.VALENCE_NEG
         self._add_event(
             "💼",
-            f"{kw['sim'].name} — {result.get('event_type','?')}: {result.get('narrative','')}",
-            kw.get("tick", 0),
+            f"{sim.name} — {result.get('event_type','?')}: {result.get('narrative','')[:60]}",
+            col,
         )
 
     def _on_life(self, **kw) -> None:
         result = kw.get("result", {})
+        sim_a  = kw.get("sim_a")
+        name   = sim_a.name if sim_a else "?"
         self._add_event(
             "🌟",
-            f"{result.get('event_type','life event')}: {result.get('narrative','')}",
-            kw.get("tick", 0),
+            f"[{result.get('event_type','?')}] {name}: {result.get('narrative','')[:60]}",
+            C.TEXT_GOLD,
         )
+        self.state = self.engine.get_state()
 
     def _on_child_born(self, **kw) -> None:
         child = kw["child"]
-        pa = kw["parent_a"]
-        pb = kw["parent_b"]
+        pa    = kw["parent_a"]
+        pb    = kw["parent_b"]
         self._add_event(
             "👶",
-            f"{child.name} born to {pa.name} & {pb.name}  "
-            f"[traits: {', '.join(child.profile['traits'])}]",
-            kw.get("tick", 0),
+            f"{child.name} born to {pa.name} & {pb.name}",
+            C.STAGE_COLOUR.get("child", C.TEXT_BRIGHT),
+            sub=[(f"Traits: {', '.join(child.profile['traits'][:3])}", C.TEXT_DIM)],
         )
-        # Refresh state so new sim appears immediately
-        self._state = self.engine.get_state()
+        self.state = self.engine.get_state()
+
+    def _on_stage(self, **kw) -> None:
+        sim     = kw["sim"]
+        new_stg = kw["new_stage"].replace("_", " ")
+        age     = kw["age"]
+        col     = C.STAGE_COLOUR.get(kw["new_stage"], C.TEXT)
+        self._add_event(
+            "🎂",
+            f"{sim.name} turns {age}  →  {new_stg}",
+            col,
+        )
+
+    def _on_died(self, **kw) -> None:
+        sim = kw["sim"]
+        age = kw["age"]
+        self._add_event(
+            "✝",
+            f"{sim.name}  passed away at age {age}",
+            C.TEXT_DIM,
+            sub=[(f"Aspiration: {sim.profile.get('aspiration','?')}  §{sim.simoleons:.0f}", C.TEXT_GHOST)],
+        )
+        self.state = self.engine.get_state()
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    def _add_event(self, icon: str, text: str, tick: int) -> None:
-        self._event_log.insert(0, {"icon": icon, "text": text, "tick": tick})
-        self._event_log = self._event_log[:60]   # keep last 60
-
-    def _add_story_event(self, text: str, is_narrator: bool = True) -> None:
-        speaker = "narrator" if is_narrator else "sim"
-        self._story_segments.insert(0, {"speaker": speaker, "text": text})
-        self._story_segments = self._story_segments[:8]
+    def _add_event(
+        self,
+        icon: str,
+        text: str,
+        colour: tuple = C.TEXT,
+        sub: list | None = None,
+    ) -> None:
+        self.event_log.insert(0, {
+            "icon":   icon,
+            "text":   text,
+            "colour": colour,
+            "sub":    sub or [],
+        })
+        self.event_log = self.event_log[:80]
 
     def queue_tts(self, speaker: str, text: str, tick: int = 0, emotion: str = "") -> None:
-        """Queue a TTS segment for background synthesis + playback."""
         if self.tts:
             self._tts_queue.put((speaker, text, tick, emotion))
 
@@ -196,7 +298,7 @@ class Game:
             item = self._tts_queue.get()
             if item is None:
                 break
-            speaker, text, tick, emotion = (*item, "") if len(item) == 3 else item
+            speaker, text, tick, emotion = ((*item, "")[:4])
             try:
                 if self.tts:
                     self.tts.speak(speaker, text, tick=tick, emotion=emotion)
@@ -206,4 +308,7 @@ class Game:
 
     def shutdown(self) -> None:
         self._tts_queue.put(None)
-        self.engine.shutdown()
+        if self._rt:
+            self._rt.shutdown()
+        else:
+            self.engine.shutdown()
