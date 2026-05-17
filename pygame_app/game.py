@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from typing import TYPE_CHECKING
 
 import pygame
@@ -34,33 +35,34 @@ class Game:
     ):
         self.engine  = engine
         self.tts     = tts
-        self._rt     = rt          # non-None → realtime mode
+        self._rt     = rt
 
         self.running  = True
         self.paused   = False
-        self._speed_idx = 3        # index into SPEEDS (default 1.0 t/s)
-        self._accum   = 0.0
-        self._tab_sims: list[str] = []
+        self._speed_idx = 3
         self._tab_idx  = 0
 
-        self.state: dict = engine.get_state()
+        # State is written by engine thread, read by render thread.
+        # get_state() returns a plain dict (JSON-safe) so the snapshot
+        # is safe to pass across threads without a lock.
+        self._state_lock = threading.Lock()
+        self._state: dict = engine.get_state()
+
         self.selected_sim_id: str | None = None
 
-        # Event feed (displayed in live-feed panel)
-        self.event_log: list[dict]  = []      # list of {icon, text, colour, sub}
-
-        # Valence sparkline data
+        # Event feed — engine thread appends, render thread reads.
+        # Use a lock so list mutations are safe.
+        self._feed_lock   = threading.Lock()
+        self.event_log: list[dict]    = []
         self.valence_history: list[float] = []
-
-        # Last model trace for the bottom panel
         self.last_model_trace: list[tuple] = []
 
-        # TTS
+        # TTS synthesis (separate daemon thread)
         self._tts_queue = queue.Queue()
         self._tts_thread = threading.Thread(target=self._tts_worker, daemon=True)
         self._tts_thread.start()
 
-        # Subscribe to engine events
+        # Subscribe to engine events (callbacks fire on engine thread — safe)
         engine._bus.on("interaction_queued",   self._on_queued)
         engine._bus.on("interaction_resolved", self._on_resolved)
         engine._bus.on("career_event",         self._on_career)
@@ -69,34 +71,74 @@ class Game:
         engine._bus.on("stage_transition",     self._on_stage)
         engine._bus.on("sim_died",             self._on_died)
 
+        # Start engine on its own thread — keeps render loop unblocked
+        self._engine_thread = threading.Thread(
+            target=self._engine_loop, daemon=True, name="engine"
+        )
+        self._engine_thread.start()
+
     # ── Properties ────────────────────────────────────────────────────────────
 
     @property
     def speed(self) -> float:
         return SPEEDS[self._speed_idx]
 
-    # ── Main loop ─────────────────────────────────────────────────────────────
+    @property
+    def state(self) -> dict:
+        with self._state_lock:
+            return self._state
+
+    def get_feed_snapshot(self) -> tuple[list, list, list]:
+        """Thread-safe snapshot of feed data for the renderer."""
+        with self._feed_lock:
+            return (
+                list(self.event_log),
+                list(self.valence_history),
+                list(self.last_model_trace),
+            )
+
+    # ── Engine background thread ──────────────────────────────────────────────
+
+    def _engine_loop(self) -> None:
+        """
+        Runs engine ticks (or rt.update()) on a background thread.
+        The render loop never touches the engine directly — only reads
+        the state snapshot via self.state.
+        """
+        accum = 0.0
+        last  = time.monotonic()
+
+        while self.running:
+            now     = time.monotonic()
+            elapsed = now - last
+            last    = now
+
+            if not self.paused:
+                if self._rt:
+                    # Real-time: update as fast as possible
+                    self._rt.update()
+                    snap = self._rt.get_state()
+                else:
+                    # Tick-based: fire at self.speed ticks per second
+                    accum += elapsed * self.speed
+                    if accum >= 1.0:
+                        accum -= 1.0
+                        self.engine.run_tick()
+                    snap = self.engine.get_state()
+
+                with self._state_lock:
+                    self._state = snap
+
+            # Yield to avoid pegging a core
+            time.sleep(0.005)
+
+    # ── Render loop (main thread — never touches engine) ──────────────────────
 
     def run(self, renderer) -> None:
         clock = pygame.time.Clock()
         while self.running:
-            dt = clock.tick(60) / 1000.0
+            clock.tick(60)
             self._handle_events(renderer)
-
-            if self._rt:
-                # Real-time mode: update engine every frame
-                if not self.paused:
-                    self._rt.update()
-                self.state = self._rt.get_state()
-            else:
-                # Tick mode: accumulate and fire
-                if not self.paused:
-                    self._accum += dt * self.speed
-                    if self._accum >= 1.0:
-                        self._accum -= 1.0
-                        self.engine.run_tick()
-                self.state = self.engine.get_state()
-
             renderer.draw(self)
             pygame.display.flip()
 
@@ -168,9 +210,10 @@ class Game:
         emo_a   = result.get("emotion_a", "")
         emo_b   = result.get("emotion_b", "")
 
-        self.valence_history.append(valence)
-        if len(self.valence_history) > 200:
-            self.valence_history = self.valence_history[-200:]
+        with self._feed_lock:
+            self.valence_history.append(valence)
+            if len(self.valence_history) > 200:
+                self.valence_history = self.valence_history[-200:]
 
         v_col = C.VALENCE_POS if valence > 0.15 else C.VALENCE_NEG if valence < -0.15 else C.VALENCE_NEU
 
@@ -191,8 +234,8 @@ class Game:
             v_col, sub=sub,
         )
 
-        # Update model trace panel
-        self.last_model_trace = self._build_model_trace(result, valence)
+        with self._feed_lock:
+            self.last_model_trace = self._build_model_trace(result, valence)
 
         # TTS
         if reaction and self.tts:
@@ -281,13 +324,10 @@ class Game:
         colour: tuple = C.TEXT,
         sub: list | None = None,
     ) -> None:
-        self.event_log.insert(0, {
-            "icon":   icon,
-            "text":   text,
-            "colour": colour,
-            "sub":    sub or [],
-        })
-        self.event_log = self.event_log[:80]
+        entry = {"icon": icon, "text": text, "colour": colour, "sub": sub or []}
+        with self._feed_lock:
+            self.event_log.insert(0, entry)
+            self.event_log = self.event_log[:80]
 
     def queue_tts(self, speaker: str, text: str, tick: int = 0, emotion: str = "") -> None:
         if self.tts:

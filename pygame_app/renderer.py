@@ -123,15 +123,18 @@ class Renderer:
 
     def draw(self, game: "Game") -> None:
         self.surf.fill(C.BG)
-        state = game.state
+        state = game.state   # thread-safe snapshot
+
+        # Grab feed data in one locked call so renderer never races engine thread
+        event_log, valence_history, model_trace = game.get_feed_snapshot()
 
         self._draw_hud(game, state)
         self._draw_panel_borders()
         self._draw_roster(game, state)
         self._draw_graph(game, state)
-        self._draw_feed(game)
+        self._draw_feed(event_log)
         self._draw_detail(game, state)
-        self._draw_bottom(game, state)
+        self._draw_bottom_data(game, state, valence_history, model_trace)
 
     # ── HUD ───────────────────────────────────────────────────────────────────
 
@@ -428,7 +431,7 @@ class Renderer:
 
     # ── Live Feed ─────────────────────────────────────────────────────────────
 
-    def _draw_feed(self, game: "Game") -> None:
+    def _draw_feed(self, event_log: list) -> None:
         x0 = FEED_X + 1
         w  = FEED_W - 2
 
@@ -436,7 +439,7 @@ class Renderer:
         self.surf.blit(h, (x0 + 6, CONTENT_Y + 5))
 
         y = CONTENT_Y + 22
-        for entry in game.event_log:
+        for entry in event_log:
             if y + 14 > BOT_Y:
                 break
             y = self._draw_feed_entry(entry, x0, y, w)
@@ -590,10 +593,13 @@ class Renderer:
 
     # ── Bottom strip ──────────────────────────────────────────────────────────
 
-    def _draw_bottom(self, game: "Game", state: dict) -> None:
+    def _draw_bottom_data(
+        self, game: "Game", state: dict,
+        valence_history: list, model_trace: list,
+    ) -> None:
         self._draw_relationships_panel(state)
-        self._draw_valence_panel(game)
-        self._draw_model_trace_panel(game)
+        self._draw_valence_panel(valence_history)
+        self._draw_model_trace_panel(model_trace)
 
     def _draw_relationships_panel(self, state: dict) -> None:
         x0 = 0
@@ -645,14 +651,14 @@ class Renderer:
 
             y += row_h
 
-    def _draw_valence_panel(self, game: "Game") -> None:
+    def _draw_valence_panel(self, valence_history: list) -> None:
+        history = valence_history
         x0 = REL_PANEL_W + 1
         w  = VAL_PANEL_W - 2
 
         h = self.f_xs.render("VALENCE HISTORY", True, C.TEXT_DIM)
         self.surf.blit(h, (x0 + 8, BOT_Y + 5))
 
-        history = game.valence_history
         if not history:
             return
 
@@ -705,14 +711,14 @@ class Renderer:
             ss = self.f_xs.render(stat, True, pos_c)
             self.surf.blit(ss, (x0 + 8, BOT_Y + BOT_H - 18))
 
-    def _draw_model_trace_panel(self, game: "Game") -> None:
+    def _draw_model_trace_panel(self, model_trace: list) -> None:
         x0 = REL_PANEL_W + VAL_PANEL_W + 1
         w  = MODEL_PANEL_W - 2
 
         h = self.f_xs.render("MODEL TRACE  (last interaction)", True, C.TEXT_DIM)
         self.surf.blit(h, (x0 + 8, BOT_Y + 5))
 
-        trace = game.last_model_trace
+        trace = model_trace
         if not trace:
             nd = self.f_xs.render("No interaction yet", True, C.TEXT_GHOST)
             self.surf.blit(nd, (x0 + 10, BOT_Y + 24))
