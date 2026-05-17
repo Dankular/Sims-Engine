@@ -17,6 +17,17 @@ ADJUDICATOR_SCHEMA = {
         "charisma_xp_a":         {"type": "number"},
         "comedy_xp_a":           {"type": "number"},
         "reasoning":             {"type": "string"},
+        # Optional life event suggestion — LLM can surface emergent events
+        "suggested_event": {
+            "type": "object",
+            "properties": {
+                "type":       {"type": "string"},   # EventType constant
+                "narrative":  {"type": "string"},   # human-readable summary
+                "visibility": {"type": "string"},   # Visibility constant
+                "valence":    {"type": "number"},
+                "intensity":  {"type": "number"},
+            },
+        },
     },
     "required": [
         "sim_b_reaction", "friendship_delta", "romance_delta",

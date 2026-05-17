@@ -703,11 +703,15 @@ def choose_interaction(
         is_interaction_blocked,
         sentiment_unlocked_interactions,
     )
+    # _blocked_interactions: set by EventEngine consequences (temporary event blocks)
+    _event_blocked = set(getattr(sim_a, "_blocked_interactions", []))
+
     candidates = [
         (action, weight)
         for action, weight in candidates
         if not sim_a.is_on_cooldown(action, current_tick)
         and not is_interaction_blocked(relationship, action)
+        and action not in _event_blocked
     ]
     # Sentiment-unlocked interactions (with boosted weight)
     for unlocked in sentiment_unlocked_interactions(relationship):
@@ -737,6 +741,10 @@ def choose_interaction(
     if getattr(sim_b, "celebrity_score", 0) >= CELEBRITY_INTERACTION_THRESHOLD:
         candidates.append(("ask for autograph", 1.2))
         candidates.append(("fan encounter", 1.0))
+
+    # ── Holiday special interactions ──────────────────────────────────────────
+    for holiday_action in getattr(sim_a, "_holiday_interactions", []):
+        candidates.append((holiday_action, 1.6))
 
     if not candidates:
         sim_a._action_cooldowns.clear()

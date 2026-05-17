@@ -24,7 +24,13 @@ Return keys:
 - memory_tag
 - charisma_xp_a
 - comedy_xp_a
-- reasoning"""
+- reasoning
+- suggested_event (optional) — if the interaction implies a significant life event,
+  include this object with keys: type, narrative, visibility, valence, intensity.
+  Valid types: birth, death, marriage, divorce, breakup, job_loss, promotion,
+  illness, scandal, redemption, moving_out, random_drama.
+  Valid visibility: private, witnessed, household, club, public.
+  Only include when genuinely warranted by the interaction context."""
 
 
 def call_adjudicator(backend: LLMBackend, system: str, user: str) -> dict:

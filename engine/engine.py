@@ -140,10 +140,13 @@ class SimEngine:
 
         # Attach moodlets to all sims
         from core.moodlets import MoodletStack
-
         for sim in self.sims:
             if not hasattr(sim, "moodlets"):
                 sim.moodlets = MoodletStack()
+
+        # Central life event engine (P0 context-aware framework)
+        from narrative.event_engine import EventEngine as _EventEngine
+        self.event_engine = _EventEngine()
 
         self._bus.on("tick_complete", self._on_tick_complete)
         assign_lod_tiers(self.sims)
@@ -503,6 +506,9 @@ class SimEngine:
             except Exception as exc:
                 logger.warning("Autosave failed: %s", exc)
 
+        # ── P0 Event engine (trigger detection) ──────────────────────────────
+        self.event_engine.tick(self)
+
         # ── New systems (Tier 1 & 2 gaps) ────────────────────────────────────
         self.weather.tick(self)
         self.crafting.tick(self)
@@ -677,6 +683,7 @@ class SimEngine:
                     if hasattr(sim, "lifetime_wish")
                     else None,
                     "club_count": len(getattr(sim, "club_ids", [])),
+                    "known_events": self.event_engine.get_events_known_by(sim.sim_id, limit=5),
                     "relationships": rels,
                 }
             )
@@ -1498,6 +1505,23 @@ class SimEngine:
             rd,
             valence,
         )
+        # ── LLM-suggested life event ──────────────────────────────────────────
+        suggested = result.get("suggested_event")
+        if suggested and isinstance(suggested, dict):
+            try:
+                from narrative.event_triggers import EventTriggerSystem
+                ev = EventTriggerSystem.from_llm_suggestion(
+                    sim_a.sim_id, sim_b.sim_id, suggested, self
+                )
+                if ev:
+                    self.event_engine.process(ev, self)
+                    logger.info(
+                        "[LLM Event] %s suggested: %s",
+                        sim_a.name, ev.narrative[:60],
+                    )
+            except Exception as exc:
+                logger.debug("[LLM Event] parse failed: %s", exc)
+
         # ── Drama cascade ─────────────────────────────────────────────────────
         self.drama.on_resolved(sim_a, sim_b, valence, item.interaction, self)
 
@@ -1579,6 +1603,96 @@ class SimEngine:
             interaction_id=item.interaction_id,
             interaction=item.interaction,
         )
+
+    def _wire_event_bus(self) -> None:
+        """
+        Subscribe to existing bus events and route them through EventEngine
+        so they gain visibility propagation, consequence application, and
+        per-sim memory storage.
+        """
+        from core.event_record import LifeEvent, EventType, Visibility
+        from narrative.event_templates import build_consequences
+
+        def _make_and_process(event_type, primary_sim, secondary_sims, narrative,
+                               visibility, valence, intensity, duration, extra=None):
+            primary_id = getattr(primary_sim, "sim_id", "") if primary_sim else ""
+            secondary_ids = [getattr(s, "sim_id", "") for s in secondary_sims if s]
+            if not primary_id:
+                return
+            c = build_consequences(event_type, primary_id, secondary_ids, self,
+                                   extra=extra or {})
+            ev = LifeEvent.make(
+                event_type=event_type, primary_sim_id=primary_id,
+                secondary_sim_ids=secondary_ids, narrative=narrative,
+                tick=self._tick_count, visibility=visibility,
+                valence=valence, intensity=intensity, duration_ticks=duration,
+                consequences=c, source="bus_redirect",
+            )
+            self.event_engine.process(ev, self)
+
+        # Marriage
+        self._bus.on("married", lambda **kw: _make_and_process(
+            EventType.MARRIAGE, kw.get("sim_a"), [kw.get("sim_b")],
+            f"{getattr(kw.get('sim_a'),'name','?')} and {getattr(kw.get('sim_b'),'name','?')} got married!",
+            Visibility.PUBLIC, +0.9, 0.9, 30,
+        ))
+        # Divorce
+        self._bus.on("divorced", lambda **kw: _make_and_process(
+            EventType.DIVORCE, kw.get("sim_a"), [kw.get("sim_b")],
+            f"{getattr(kw.get('sim_a'),'name','?')} and {getattr(kw.get('sim_b'),'name','?')} divorced.",
+            Visibility.HOUSEHOLD, -0.7, 0.8, 25,
+        ))
+        # Child born
+        self._bus.on("child_born", lambda **kw: _make_and_process(
+            EventType.BIRTH, kw.get("parent_a"), [kw.get("parent_b"), kw.get("child")],
+            f"{getattr(kw.get('child'),'name','?')} was born to "
+            f"{getattr(kw.get('parent_a'),'name','?')} and {getattr(kw.get('parent_b'),'name','?')}!",
+            Visibility.HOUSEHOLD, +0.9, 0.9, 30,
+            extra={"child_id": getattr(kw.get("child"), "sim_id", "")},
+        ))
+        # Sim died
+        self._bus.on("sim_died", lambda **kw: _make_and_process(
+            EventType.DEATH, kw.get("sim"), [],
+            f"{getattr(kw.get('sim'),'name','?')} has passed away at age {kw.get('age','?')}.",
+            Visibility.PUBLIC, -0.9, 1.0, 60,
+        ))
+        # Illness update → sick
+        self._bus.on("illness_update", lambda **kw: (
+            _make_and_process(
+                EventType.ILLNESS, kw.get("sim"), [],
+                f"{getattr(kw.get('sim'),'name','?')} fell ill ({kw.get('status','?')}).",
+                Visibility.HOUSEHOLD, -0.5, 0.6, 12,
+                extra={"severity": getattr(kw.get("sim"), "illness_severity", "mild")},
+            ) if kw.get("status") == "sick" else None
+        ))
+        # Gig completed
+        self._bus.on("gig_completed", lambda **kw: (
+            _make_and_process(
+                EventType.GIG_SUCCESS, kw.get("sim"), [],
+                f"{getattr(kw.get('sim'),'name','?')} completed '{kw.get('label','a gig')}' (§{kw.get('pay',0):.0f}).",
+                Visibility.HOUSEHOLD, +0.6, 0.5, 10,
+            ) if kw.get("success") else None
+        ))
+        # Property purchased
+        self._bus.on("property_purchased", lambda **kw: _make_and_process(
+            EventType.PROPERTY_BOUGHT, kw.get("sim"), [],
+            f"{getattr(kw.get('sim'),'name','?')} bought {kw.get('property_name','a property')}.",
+            Visibility.CLUB, +0.7, 0.6, 15,
+        ))
+        # Wish fulfilled
+        self._bus.on("wish_fulfilled", lambda **kw: _make_and_process(
+            EventType.WISH_FULFILLED, kw.get("sim"), [],
+            f"{getattr(kw.get('sim'),'name','?')} fulfilled their lifetime wish!",
+            Visibility.PUBLIC, +1.0, 1.0, 40,
+        ))
+        # Milestone achieved
+        self._bus.on("milestone_achieved", lambda **kw: _make_and_process(
+            EventType.MILESTONE, kw.get("sim"), [],
+            f"{getattr(kw.get('sim'),'name','?')} reached milestone: {kw.get('milestone','?')}.",
+            Visibility.CLUB, +0.6, 0.5, 15,
+        ))
+        # Holiday
+        self._bus.on("holiday", lambda **kw: None)  # holidays handled by CalendarSystem already
 
     def _assign_coworkers(self) -> None:
         """Group sims by job category and assign them as each other's coworkers."""
