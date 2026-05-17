@@ -65,6 +65,44 @@ class EventType:
     RANDOM_DRAMA  = "random_drama"
     LLM_SUGGESTED = "llm_suggested"
 
+    # ── Conflict ──────────────────────────────────────────────────────────────
+    BETRAYAL             = "betrayal"
+    CHEATING_ACCUSATION  = "cheating_accusation"
+    ARGUMENT             = "argument"
+    RIVALRY_ESCALATION   = "rivalry_escalation"
+    PUBLIC_EMBARRASSMENT = "public_embarrassment"
+    APOLOGY              = "apology"
+    RECONCILIATION       = "reconciliation"
+
+    # ── Romance arc ───────────────────────────────────────────────────────────
+    CRUSH_FORMED      = "crush_formed"
+    LOVE_CONFESSION   = "love_confession"
+    FIRST_KISS_EVENT  = "first_kiss_event"
+    DATING_STARTED    = "dating_started"
+    ENGAGEMENT        = "engagement"
+
+    # ── Friendship arc ────────────────────────────────────────────────────────
+    BEST_FRIENDS_FORMED = "best_friends_formed"
+    DRIFTING_APART      = "drifting_apart"
+    CRISIS_SUPPORT      = "crisis_support"
+    JEALOUSY_INCIDENT   = "jealousy_incident"
+    SOCIAL_EXCLUSION    = "social_exclusion"
+
+    # ── Family arc ────────────────────────────────────────────────────────────
+    PREGNANCY_DISCOVERY  = "pregnancy_discovery"
+    SIBLING_RIVALRY      = "sibling_rivalry"
+    PARENTAL_NEGLECT     = "parental_neglect"
+    PARENTAL_SUPPORT     = "parental_support"
+    INHERITANCE_RECEIVED = "inheritance_received"
+    FAMILY_FEUD          = "family_feud"
+
+    # ── Gossip / rumour ───────────────────────────────────────────────────────
+    RUMOUR_CREATED    = "rumour_created"
+    RUMOUR_SPREAD     = "rumour_spread"
+    RUMOUR_BELIEVED   = "rumour_believed"
+    RUMOUR_DISPROVEN  = "rumour_disproven"
+    REPUTATION_DAMAGE = "reputation_damage"
+
 
 # ── Consequence spec ────────────────────────────────────────────────────────────
 

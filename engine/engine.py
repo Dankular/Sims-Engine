@@ -1505,7 +1505,38 @@ class SimEngine:
             rd,
             valence,
         )
-        # ── LLM-suggested life event ──────────────────────────────────────────
+        # ── Rumour disproven check ────────────────────────────────────────────
+        if (
+            valence > 0.65
+            and any(kw in item.interaction.lower() for kw in
+                    ('clear the air', 'defend', 'confront', 'reconcile', 'prove'))
+        ):
+            try:
+                from narrative.event_triggers import _rumour_pool
+                from core.event_record import EventType as _ET, Visibility as _V
+                from narrative.event_templates import build_consequences as _bc
+                from core.event_record import LifeEvent as _LE
+                for rumour in list(_rumour_pool):
+                    if rumour.get('subject_id') == sim_a.sim_id:
+                        _rumour_pool.remove(rumour)
+                        c = _bc(_ET.RUMOUR_DISPROVEN, sim_a.sim_id,
+                                [sim_b.sim_id], self,
+                                extra={'spreader_id': sim_b.sim_id})
+                        ev = _LE.make(
+                            _ET.RUMOUR_DISPROVEN, sim_a.sim_id,
+                            f'{sim_a.name} successfully disproved the rumour against them.',
+                            self._tick_count,
+                            secondary_sim_ids=[sim_b.sim_id],
+                            visibility=_V.PUBLIC,
+                            valence=+0.7, intensity=0.6, duration_ticks=20,
+                            consequences=c, source='resolved_interaction',
+                        )
+                        self.event_engine.process(ev, self)
+                        break
+            except Exception:
+                pass
+
+                # ── LLM-suggested life event ──────────────────────────────────────────
         suggested = result.get("suggested_event")
         if suggested and isinstance(suggested, dict):
             try:

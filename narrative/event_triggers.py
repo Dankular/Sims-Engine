@@ -59,6 +59,10 @@ class EventTriggerSystem:
         events += _check_need_based(engine, tick)
         events += _check_relationship_based(engine, tick)
         events += _check_reputation_based(engine, tick)
+        events += _check_romance_arc(engine, tick)
+        events += _check_friendship_arc(engine, tick)
+        events += _check_family_arc(engine, tick)
+        events += _check_gossip_rumour(engine, tick)
         events += _check_random_drama(engine, tick)
 
         return events
@@ -266,6 +270,313 @@ _DRAMA_TYPES = [
 ]
 
 _DRAMA_WEIGHTS = [d[0] for d in _DRAMA_TYPES]
+
+
+# ── Romance arc triggers ───────────────────────────────────────────────────────
+
+_ROMANCE_COOLDOWNS = {
+    "crush":    30,
+    "confess":  40,
+    "kiss":     50,
+    "dating":   60,
+    "engage":   80,
+}
+_romance_last: dict[str, dict[str, int]] = {}
+
+
+def _romance_can(pair_key: str, stage: str, tick: int) -> bool:
+    return tick - _romance_last.get(pair_key, {}).get(stage, -999) >= _ROMANCE_COOLDOWNS[stage]
+
+
+def _romance_record(pair_key: str, stage: str, tick: int) -> None:
+    _romance_last.setdefault(pair_key, {})[stage] = tick
+
+
+def _check_romance_arc(engine: "SimEngine", tick: int) -> list[LifeEvent]:
+    from core.event_record import EventType, Visibility
+    events = []
+    processed: set[frozenset] = set()
+
+    for sim in engine.sims:
+        for other in engine.sims:
+            if other.sim_id <= sim.sim_id:
+                continue
+            pair = frozenset({sim.sim_id, other.sim_id})
+            if pair in processed:
+                continue
+            processed.add(pair)
+            pk = f"{min(sim.sim_id,other.sim_id)}_{max(sim.sim_id,other.sim_id)}"
+            rel = engine.relationships.get(sim.sim_id, other.sim_id)
+
+            # Crush formed: romance crosses 20 for the first time
+            if rel.romance >= 20 and _romance_can(pk, "crush", tick):
+                _romance_record(pk, "crush", tick)
+                c = build_consequences(EventType.CRUSH_FORMED, sim.sim_id, [other.sim_id], engine)
+                events.append(LifeEvent.make(
+                    EventType.CRUSH_FORMED, sim.sim_id,
+                    f"{sim.name} has developed a crush on {other.name}.",
+                    tick, secondary_sim_ids=[other.sim_id],
+                    visibility=Visibility.PRIVATE,
+                    valence=+0.7, intensity=0.6, duration_ticks=20,
+                    consequences=c, source="trigger:romance_arc",
+                ))
+
+            # Love confession: romance 40+
+            if rel.romance >= 40 and rel.interactions >= 6 and _romance_can(pk, "confess", tick):
+                _romance_record(pk, "confess", tick)
+                c = build_consequences(EventType.LOVE_CONFESSION, sim.sim_id, [other.sim_id], engine)
+                events.append(LifeEvent.make(
+                    EventType.LOVE_CONFESSION, sim.sim_id,
+                    f"{sim.name} confessed their feelings to {other.name}.",
+                    tick, secondary_sim_ids=[other.sim_id],
+                    visibility=Visibility.WITNESSED,
+                    valence=+0.8, intensity=0.7, duration_ticks=15,
+                    consequences=c, source="trigger:romance_arc",
+                ))
+
+            # First kiss: romance 55+
+            if rel.romance >= 55 and _romance_can(pk, "kiss", tick):
+                _romance_record(pk, "kiss", tick)
+                c = build_consequences(EventType.FIRST_KISS_EVENT, sim.sim_id, [other.sim_id], engine)
+                events.append(LifeEvent.make(
+                    EventType.FIRST_KISS_EVENT, sim.sim_id,
+                    f"{sim.name} and {other.name} shared their first kiss.",
+                    tick, secondary_sim_ids=[other.sim_id],
+                    visibility=Visibility.WITNESSED,
+                    valence=+0.9, intensity=0.8, duration_ticks=20,
+                    consequences=c, source="trigger:romance_arc",
+                ))
+
+            # Dating started: romance 65+
+            if rel.romance >= 65 and _romance_can(pk, "dating", tick):
+                _romance_record(pk, "dating", tick)
+                c = build_consequences(EventType.DATING_STARTED, sim.sim_id, [other.sim_id], engine)
+                events.append(LifeEvent.make(
+                    EventType.DATING_STARTED, sim.sim_id,
+                    f"{sim.name} and {other.name} are now officially dating.",
+                    tick, secondary_sim_ids=[other.sim_id],
+                    visibility=Visibility.HOUSEHOLD,
+                    valence=+0.8, intensity=0.7, duration_ticks=25,
+                    consequences=c, source="trigger:romance_arc",
+                ))
+
+            # Engagement: romance 85+ without marriage yet
+            if (
+                rel.romance >= 85
+                and not getattr(sim, "_married_to", None)
+                and not getattr(other, "_married_to", None)
+                and _romance_can(pk, "engage", tick)
+                and random.random() < 0.15
+            ):
+                _romance_record(pk, "engage", tick)
+                c = build_consequences(EventType.ENGAGEMENT, sim.sim_id, [other.sim_id], engine)
+                events.append(LifeEvent.make(
+                    EventType.ENGAGEMENT, sim.sim_id,
+                    f"{sim.name} proposed to {other.name} — they said yes!",
+                    tick, secondary_sim_ids=[other.sim_id],
+                    visibility=Visibility.PUBLIC,
+                    valence=+1.0, intensity=0.95, duration_ticks=30,
+                    consequences=c, source="trigger:romance_arc",
+                ))
+
+    return events
+
+
+# ── Friendship arc triggers ────────────────────────────────────────────────────
+
+_friend_milestones: dict[str, set[str]] = {}  # sim_id → set of "best_friend:other_id" etc.
+
+
+def _check_friendship_arc(engine: "SimEngine", tick: int) -> list[LifeEvent]:
+    from core.event_record import EventType, Visibility
+    events = []
+
+    for sim in engine.sims:
+        for other in engine.sims:
+            if other.sim_id <= sim.sim_id:
+                continue
+            rel = engine.relationships.get(sim.sim_id, other.sim_id)
+            mkey = f"{min(sim.sim_id,other.sim_id)}_bf_{max(sim.sim_id,other.sim_id)}"
+            dkey = f"{min(sim.sim_id,other.sim_id)}_da_{max(sim.sim_id,other.sim_id)}"
+
+            # Best friends formed
+            if rel.friendship >= 80 and mkey not in _friend_milestones.get(sim.sim_id, set()):
+                _friend_milestones.setdefault(sim.sim_id, set()).add(mkey)
+                _friend_milestones.setdefault(other.sim_id, set()).add(mkey)
+                c = build_consequences(EventType.BEST_FRIENDS_FORMED, sim.sim_id, [other.sim_id], engine)
+                events.append(LifeEvent.make(
+                    EventType.BEST_FRIENDS_FORMED, sim.sim_id,
+                    f"{sim.name} and {other.name} have become best friends.",
+                    tick, secondary_sim_ids=[other.sim_id],
+                    visibility=Visibility.HOUSEHOLD,
+                    valence=+0.9, intensity=0.8, duration_ticks=40,
+                    consequences=c, source="trigger:friendship_arc",
+                ))
+
+            # Drifting apart: was close, now decayed
+            if (
+                rel.friendship < 30
+                and rel.interactions > 10
+                and dkey not in _friend_milestones.get(sim.sim_id, set())
+                and random.random() < 0.05
+            ):
+                _friend_milestones.setdefault(sim.sim_id, set()).add(dkey)
+                c = build_consequences(EventType.DRIFTING_APART, sim.sim_id, [other.sim_id], engine)
+                events.append(LifeEvent.make(
+                    EventType.DRIFTING_APART, sim.sim_id,
+                    f"{sim.name} and {other.name} have grown apart over time.",
+                    tick, secondary_sim_ids=[other.sim_id],
+                    visibility=Visibility.PRIVATE,
+                    valence=-0.4, intensity=0.5, duration_ticks=20,
+                    consequences=c, source="trigger:friendship_arc",
+                ))
+
+            # Jealousy incident: jealousy_score spikes
+            if rel.jealousy_score >= 65 and _can_fire(sim.sim_id, "relationship_based", tick):
+                _record_fire(sim.sim_id, "relationship_based", tick)
+                c = build_consequences(EventType.JEALOUSY_INCIDENT, sim.sim_id, [other.sim_id], engine)
+                events.append(LifeEvent.make(
+                    EventType.JEALOUSY_INCIDENT, sim.sim_id,
+                    f"{sim.name} is overwhelmed with jealousy toward {other.name}.",
+                    tick, secondary_sim_ids=[other.sim_id],
+                    visibility=Visibility.WITNESSED,
+                    valence=-0.5, intensity=0.6, duration_ticks=10,
+                    consequences=c, source="trigger:friendship_arc",
+                ))
+
+    return events
+
+
+# ── Family arc triggers ────────────────────────────────────────────────────────
+
+def _check_family_arc(engine: "SimEngine", tick: int) -> list[LifeEvent]:
+    from core.event_record import EventType, Visibility
+    events = []
+
+    for sim in engine.sims:
+        if not _can_fire(sim.sim_id, "relationship_based", tick):
+            continue
+
+        # Sibling rivalry: two children in same household with low friendship
+        if sim.is_child_of:
+            siblings = [
+                o for o in engine.sims
+                if o.sim_id != sim.sim_id
+                and o.is_child_of
+                and o.household_id == sim.household_id
+                and engine.relationships.get(sim.sim_id, o.sim_id).friendship < -10
+            ]
+            if siblings and random.random() < 0.08:
+                _record_fire(sim.sim_id, "relationship_based", tick)
+                sib = siblings[0]
+                c = build_consequences(EventType.SIBLING_RIVALRY, sim.sim_id, [sib.sim_id], engine)
+                events.append(LifeEvent.make(
+                    EventType.SIBLING_RIVALRY, sim.sim_id,
+                    f"{sim.name} and {sib.name} are caught in ongoing sibling rivalry.",
+                    tick, secondary_sim_ids=[sib.sim_id],
+                    visibility=Visibility.HOUSEHOLD,
+                    valence=-0.5, intensity=0.6, duration_ticks=15,
+                    consequences=c, source="trigger:family_arc",
+                ))
+
+        # Family feud: household members at enemy level
+        hh_members = [
+            o for o in engine.sims
+            if o.sim_id != sim.sim_id
+            and o.household_id == sim.household_id
+            and engine.relationships.get(sim.sim_id, o.sim_id).friendship <= -50
+        ]
+        if hh_members and random.random() < 0.06:
+            _record_fire(sim.sim_id, "relationship_based", tick)
+            other = hh_members[0]
+            c = build_consequences(EventType.FAMILY_FEUD, sim.sim_id, [other.sim_id], engine)
+            events.append(LifeEvent.make(
+                EventType.FAMILY_FEUD, sim.sim_id,
+                f"A family feud erupts between {sim.name} and {other.name}.",
+                tick, secondary_sim_ids=[other.sim_id],
+                visibility=Visibility.HOUSEHOLD,
+                valence=-0.7, intensity=0.8, duration_ticks=30,
+                consequences=c, source="trigger:family_arc",
+            ))
+
+    return events
+
+
+# ── Gossip / rumour lifecycle triggers ─────────────────────────────────────────
+
+_rumour_pool: list[dict] = []  # {subject_id, text, credibility, believers, tick_created}
+_rumour_cooldown: dict[str, int] = {}
+
+
+def _check_gossip_rumour(engine: "SimEngine", tick: int) -> list[LifeEvent]:
+    from core.event_record import EventType, Visibility
+    events = []
+
+    # Occasionally a sim invents/exaggerates a rumour about another
+    if random.random() < 0.06 and len(engine.sims) >= 3:
+        creator = random.choice(engine.sims)
+        subjects = [s for s in engine.sims if s.sim_id != creator.sim_id]
+        if subjects:
+            subject = random.choice(subjects)
+            if tick - _rumour_cooldown.get(creator.sim_id, -50) >= 30:
+                _rumour_cooldown[creator.sim_id] = tick
+                rep = subject.reputation_score
+                rumour_text = (
+                    f"{subject.name} reportedly did something scandalous"
+                    if rep < 0 else
+                    f"There are whispers that {subject.name} is hiding something"
+                )
+                _rumour_pool.append({
+                    "subject_id": subject.sim_id,
+                    "text":       rumour_text,
+                    "credibility": max(0.1, 0.3 + creator.celebrity_score / 200),
+                    "believers":   {creator.sim_id},
+                    "tick":        tick,
+                })
+                c = build_consequences(EventType.RUMOUR_CREATED, creator.sim_id, [subject.sim_id], engine)
+                events.append(LifeEvent.make(
+                    EventType.RUMOUR_CREATED, creator.sim_id,
+                    f"{creator.name} started a rumour: \"{rumour_text[:60]}\"",
+                    tick, secondary_sim_ids=[subject.sim_id],
+                    visibility=Visibility.CLUB,
+                    valence=-0.3, intensity=0.4, duration_ticks=20,
+                    consequences=c, source="trigger:gossip",
+                ))
+
+    # Spread existing rumours
+    for rumour in list(_rumour_pool):
+        if tick - rumour["tick"] > 40:
+            _rumour_pool.remove(rumour)
+            continue
+
+        # Each tick: 20% chance a new sim hears it
+        if random.random() < 0.20:
+            potential = [s for s in engine.sims if s.sim_id not in rumour["believers"]]
+            if potential:
+                hearer = random.choice(potential)
+                rumour["believers"].add(hearer.sim_id)
+
+                # Believes it? credibility × agreeableness of hearer
+                believe_chance = rumour["credibility"] * (1.0 - hearer.ocean.get("openness", 0.5) * 0.3)
+                if random.random() < believe_chance:
+                    subject = engine._sim_lookup.get(rumour["subject_id"])
+                    if subject:
+                        c = build_consequences(
+                            EventType.RUMOUR_BELIEVED, hearer.sim_id,
+                            [rumour["subject_id"]], engine,
+                            extra={"subject_id": rumour["subject_id"],
+                                   "rep_hit": -6.0 * rumour["credibility"]},
+                        )
+                        events.append(LifeEvent.make(
+                            EventType.RUMOUR_BELIEVED, hearer.sim_id,
+                            f"{hearer.name} believes a rumour about {subject.name}.",
+                            tick, secondary_sim_ids=[rumour["subject_id"]],
+                            visibility=Visibility.PRIVATE,
+                            valence=-0.4, intensity=0.5, duration_ticks=15,
+                            consequences=c, source="trigger:gossip",
+                        ))
+
+    return events
 
 
 def _check_random_drama(engine: "SimEngine", tick: int) -> list[LifeEvent]:
