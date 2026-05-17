@@ -125,6 +125,31 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override ticks per in-game year (default: 50 from config)",
     )
     p.add_argument(
+        "--realtime",
+        action="store_true",
+        help=(
+            "Real-time game loop mode: non-blocking update() at target FPS, "
+            "wall-clock timestamps, continuous aging. Use with --sim-speed."
+        ),
+    )
+    p.add_argument(
+        "--sim-speed",
+        type=float,
+        default=3_600.0,
+        help=(
+            "Sim seconds per real second (default: 3600 = 1 sim hr/real sec). "
+            "3600: good for open-ended play (1 sim year ≈ 2.4 real hours). "
+            "86400: 1 sim day/real sec, full life ≈ 7.6 real hours. "
+            "525600: 1 sim year/real minute, full life ≈ 75 real minutes (best for --until-death)."
+        ),
+    )
+    p.add_argument(
+        "--fps",
+        type=int,
+        default=20,
+        help="Target frame rate for realtime display updates (default: 20)",
+    )
+    p.add_argument(
         "--analytics",
         action="store_true",
         help="Track metrics and generate post-run analytics report (charts + summary JSON)",
@@ -151,6 +176,101 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Max rows printed by --list-voices (default: 25)",
     )
     return p
+
+
+def _run_realtime(engine, args, tracker, exporter, story_runner) -> None:
+    """Real-time game loop — non-blocking update() at target FPS."""
+    from engine.realtime import RealtimeSimEngine
+    from display import print_active_sims
+
+    rt = RealtimeSimEngine(engine, speed=args.sim_speed)
+    frame_time = 1.0 / max(1, args.fps)
+
+    years_est = rt.clock.wall_seconds_per_sim_year()
+    speed_lbl = rt.clock.speed_label()
+
+    if _RICH:
+        from rich.console import Console
+        _con = Console()
+        _con.print(
+            f"\n[bold bright_cyan]REALTIME MODE[/]  "
+            f"speed=[bold]{speed_lbl}[/]  "
+            f"fps=[bold]{args.fps}[/]  "
+            f"1 sim year ≈ [bold]{years_est:.0f}s[/] real\n"
+        )
+    else:
+        print(f"\n[REALTIME] speed={speed_lbl}  fps={args.fps}  "
+              f"1 sim year ≈ {years_est:.0f}s real\n")
+
+    try:
+        while not rt.all_sims_dead:
+            t0 = time.monotonic()
+
+            rt.update()
+
+            # Display
+            state = rt.get_state()
+            _print_realtime_header(state)
+            print_active_sims(engine)
+
+            if tracker:
+                tracker.snapshot(engine.tick_count)
+
+            if story_runner:
+                pass  # story_runner fires from EventBus automatically
+
+            # Frame cap
+            spent = time.monotonic() - t0
+            remaining = frame_time - spent
+            if remaining > 0:
+                time.sleep(remaining)
+
+    except KeyboardInterrupt:
+        print("\n[Interrupted]")
+
+    # Flush
+    if story_runner:
+        story_runner.flush()
+    if exporter:
+        exporter.flush_now()
+
+    from display import print_summary
+    print_summary(engine)
+
+    if tracker:
+        from analytics.report import generate
+        print("\n[INFO] Generating analytics report...")
+        report_dir = generate(tracker, output_dir=args.analytics_dir)
+        print(f"[INFO] Report → {report_dir}\n")
+
+    rt.shutdown()
+
+
+def _print_realtime_header(state: dict) -> None:
+    sim_lbl  = state.get("sim_label", "")
+    spd_lbl  = state.get("speed_label", "")
+    pending  = state.get("pending_interactions", 0)
+    n_sims   = len(state.get("sims", []))
+    pending_str = f"  [yellow]⏳ {pending} pending[/]" if pending else ""
+
+    if _RICH:
+        from rich.console import Console
+        Console().rule(
+            f"[bold bright_cyan]{sim_lbl}[/]"
+            f"  [dim]{spd_lbl}[/]"
+            f"  [dim]|[/]  [dim]{n_sims} sims alive[/]"
+            f"{pending_str}"
+        )
+    else:
+        print(f"\n  [{sim_lbl}]  speed={spd_lbl}  {n_sims} sims  "
+              + (f"⏳{pending}" if pending else ""))
+
+
+try:
+    from rich.console import Console as _RichCheck
+    _RICH = True
+except ImportError:
+    _RICH = False
 
 
 def main() -> None:
@@ -325,7 +445,12 @@ def main() -> None:
         _cfg.TICKS_PER_YEAR = args.ticks_per_year
         print(f"[INFO] Ticks per year: {args.ticks_per_year}\n")
 
-    # ── Run loop ──────────────────────────────────────────────────────────────
+    # ── Real-time game loop mode ──────────────────────────────────────────────
+    if args.realtime:
+        _run_realtime(engine, args, _tracker, _exporter, _story_runner)
+        return
+
+    # ── Tick-based run loop ────────────────────────────────────────────────────
     if args.until_death:
         oldest_age = max(s.profile.get("age", 25) for s in sims)
         from config import TICKS_PER_YEAR as TPY
