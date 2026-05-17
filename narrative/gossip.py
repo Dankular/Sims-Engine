@@ -20,3 +20,25 @@ class GossipGraph:
     def spread(self, from_id: str, to_id: str, about_id: str) -> None:
         for fact in self._facts.get((from_id, about_id), [])[-2:]:
             self.learn(to_id, about_id, fact)
+
+    def spread_trait_gossip(self, from_sim, to_sim, about_sim) -> list[str]:
+        knowledge = getattr(from_sim, "trait_knowledge", {}).get(about_sim.sim_id, {})
+        known_traits = list(knowledge.get("known_traits", []))
+        if not known_traits:
+            return []
+        forwarded = known_traits[:2]
+        to_knowledge = getattr(to_sim, "trait_knowledge", {})
+        payload = to_knowledge.setdefault(
+            about_sim.sim_id,
+            {"known_traits": [], "suspected_traits": {}, "confidence": {}},
+        )
+        current = set(payload.get("known_traits", []))
+        for trait in forwarded:
+            current.add(trait)
+            payload["confidence"][trait] = max(
+                0.5, float(payload["confidence"].get(trait, 0.0))
+            )
+            self.learn(to_sim.sim_id, about_sim.sim_id, f"trait:{trait}")
+        payload["known_traits"] = sorted(current)
+        to_sim.trait_knowledge = to_knowledge
+        return forwarded

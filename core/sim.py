@@ -15,6 +15,7 @@ from core.emotions import EmotionState
 from core.needs import Needs
 from core.skills import SkillsSystem
 from sim_types.enums import LODTier
+from sim_types.enums import ControlMode
 from sim_types.sim_types import Fear, Want
 from config import SCHEDULE_SOCIAL, SCHEDULE_WORK
 
@@ -58,6 +59,16 @@ class Sim:
         self.ei_reputation: float = 0.0  # -50..50
         # Creative reputation (Gap 3)
         self.creative_reputation: float = 0.0  # 0..100
+        self.hacker_reputation: float = 0.0
+        self.wellness_state: dict = {
+            "stress_level": 35.0,
+            "calmness": 45.0,
+            "emotional_resistance": 0.0,
+            "recovery_rate": 1.0,
+            "meditation_state": "relaxed",
+            "focus_modifier": 1.0,
+            "teleport_cooldown": 0,
+        }
         # Health scare tracking
         self._low_energy_ticks: int = 0
         # Arc systems (core/arcs.py)
@@ -80,17 +91,32 @@ class Sim:
         self._last_consolidation_tick: int = -9999
         # Extended life systems
         self.inventory: list[str] = ["snack", "book"]
+        self.inventory_objects: list[dict] = []
+        self.inventory_max_slots: int = 12
+        self.inventory_max_weight: float = 24.0
+        self.inventory_slot_limits: dict[str, int] = {
+            "hand": 2,
+            "body": 1,
+            "utility": 9,
+        }
         self.properties: list[str] = []
         self.owned_businesses: list[str] = []
         self.health_status: str = "healthy"
         self.illness_ticks_left: int = 0
         self.temperature_risk: float = 0.0
+        self.internal_temperature: float = 0.0
+        self.min_temp_limit: float = -85.0
+        self.max_temp_limit: float = 85.0
+        self.thermal_state: str = "comfortable"
         self.is_ghost: bool = False
         self.occult_type: str = "none"
         self.perk_points: int = 0
         self.perks: set[str] = set()
         self._last_perk_level_total: int = 0
         self.pending_phone_actions: list[dict] = []
+        self.control_mode: ControlMode = ControlMode.AUTONOMOUS
+        self.player_action_queue: list[dict] = []
+        self.current_directive: dict | None = None
         self.active_gig: dict | None = None
         self.active_odd_job: dict | None = None
         self.odd_job_reputation: float = 0.0
@@ -108,6 +134,8 @@ class Sim:
         self.scholarship_points: float = 0.0
         self.university_readiness: float = 0.0
         self.career_level: int = 1
+        self.career_id: str = ""  # filled by CareerManager._ensure_career
+        self.career_days: int = 0  # days spent in current role
         self.career_branch: str = "base"
         self.work_from_home_task: dict | None = None
         self.occult_power: float = 0.0
@@ -140,6 +168,34 @@ class Sim:
         self.coworker_ids: list[str] = []
         # Unlocked interactions (from milestone rewards)
         self._unlocked_interactions: list[str] = []
+        self.reward_traits: set[str] = set()
+        self.death_traits: set[str] = set()
+        self.temporary_traits: set[str] = set()
+        self.formative_traits: set[str] = set()
+        self.hidden_traits: set[str] = set()
+        self.trait_knowledge: dict[str, dict] = {}
+        self.autonomy_profile: dict[str, float] = {}
+        # Moodlet stack — always present, no engine dependency
+        from core.moodlets import MoodletStack
+        self.moodlets = MoodletStack()
+        # Career id mapped from profile job title
+        from world.careers import career_from_job_title
+        if not self.career_id:
+            self.career_id = career_from_job_title(profile.get("job", ""))
+        self.career_days: int = random.randint(0, 20)
+        # Sleep state
+        self._sleeping: bool = False
+        self._last_dream: dict | None = None
+        self.milestones: list[dict] = []
+        self.preferences: dict[str, list[str]] = {
+            "activities": list(profile.get("interests", [])),
+            "music": [],
+            "food": [profile.get("diet", "omnivore")],
+            "hobbies": list(profile.get("interests", [])),
+            "decor": [],
+            "personalities": list(profile.get("traits", [])),
+        }
+        self.refresh_trait_effects()
 
     @property
     def ocean(self) -> dict:
@@ -177,7 +233,12 @@ class Sim:
             self.emotion.add("nervousness", 0.5, duration=5, source="financial stress")
 
     def tick(self, wants_engine: "WantsEngine", all_sim_ids: list[str]) -> None:
+        if self.control_mode == ControlMode.INTERRUPTED:
+            self.emotion.add("apprehensive", 0.2, duration=1, source="interrupted")
+            self.control_mode = ControlMode.AUTONOMOUS
+
         self.needs.tick(self.ocean)
+        self._apply_trait_need_decay_mods()
         self.emotion.tick(self.ocean)
         # Update social orientation from current needs + emotion
         try:
@@ -201,6 +262,7 @@ class Sim:
             self.emotion.add(label, 0.7, duration=3, source=f"critical {need}")
 
         mood_mod = (self.emotion.dominant_valence - 0.5) * 0.5
+        mood_mod *= self._trait_career_multiplier()
         self.career_performance = max(
             0, min(100, self.career_performance + random.uniform(-1, 1) + mood_mod)
         )
@@ -221,6 +283,60 @@ class Sim:
             w.priority for w in self.active_wants if w.target_sim == other_sim_id
         )
         extraversion_bonus = self.ocean["extraversion"] * 0.3
+        social_bias = self.autonomy_profile.get("social", 0.0) * 0.15
+        solitude_bias = self.autonomy_profile.get("solitude", 0.0) * 0.12
         return round(
-            min(1.0, social_pressure * 0.5 + want_bonus + extraversion_bonus), 3
+            min(
+                1.0,
+                social_pressure * 0.5
+                + want_bonus
+                + extraversion_bonus
+                + social_bias
+                - solitude_bias,
+            ),
+            3,
         )
+
+    def refresh_trait_effects(self) -> None:
+        from core.traits import derive_autonomy_profile
+
+        self.autonomy_profile = derive_autonomy_profile(self)
+
+    def add_trait(self, trait_id: str, source: str = "temporary") -> None:
+        if source == "reward":
+            self.reward_traits.add(trait_id)
+        elif source == "death":
+            self.death_traits.add(trait_id)
+        elif source == "formative":
+            self.formative_traits.add(trait_id)
+        else:
+            self.temporary_traits.add(trait_id)
+        self.refresh_trait_effects()
+
+    def remove_trait(self, trait_id: str) -> None:
+        for bucket in (
+            self.reward_traits,
+            self.death_traits,
+            self.temporary_traits,
+            self.formative_traits,
+        ):
+            bucket.discard(trait_id)
+        self.refresh_trait_effects()
+
+    def _trait_career_multiplier(self) -> float:
+        from core.traits import career_performance_multiplier
+
+        return career_performance_multiplier(self)
+
+    def _apply_trait_need_decay_mods(self) -> None:
+        from core.traits import active_traits, TRAIT_DEFS
+
+        for trait in active_traits(self):
+            tdef = TRAIT_DEFS.get(trait)
+            if not tdef:
+                continue
+            for need, mult in tdef.need_decay_mods.items():
+                if hasattr(self.needs, need):
+                    current = float(getattr(self.needs, need))
+                    adjusted = current + (current - 50.0) * (1.0 - float(mult)) * 0.01
+                    setattr(self.needs, need, max(0.0, min(100.0, adjusted)))

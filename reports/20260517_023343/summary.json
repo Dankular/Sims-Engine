@@ -1,0 +1,81 @@
+{
+  "run_timestamp": "20260517_023343",
+  "ticks_simulated": 8,
+  "total_interactions": 1,
+  "total_life_events": 0,
+  "total_career_events": 0,
+  "mean_valence": 0.65,
+  "positive_interactions": 1,
+  "negative_interactions": 0,
+  "sims": [
+    {
+      "name": "Lisa Walsh",
+      "ocean_baseline": {
+        "openness": 0.45,
+        "conscientiousness": 0.55,
+        "extraversion": 0.6,
+        "agreeableness": 0.58,
+        "neuroticism": 0.47
+      },
+      "ocean_final": {
+        "openness": 0.45,
+        "conscientiousness": 0.55,
+        "extraversion": 0.6,
+        "agreeableness": 0.58,
+        "neuroticism": 0.47
+      },
+      "final_simoleons": 4651.7,
+      "arc_activations": {
+        "lonely": 0,
+        "burnout": 0,
+        "grief": 0
+      }
+    },
+    {
+      "name": "Matthew Jones",
+      "ocean_baseline": {
+        "openness": 0.48,
+        "conscientiousness": 0.46,
+        "extraversion": 0.67,
+        "agreeableness": 0.47,
+        "neuroticism": 0.5
+      },
+      "ocean_final": {
+        "openness": 0.48,
+        "conscientiousness": 0.46,
+        "extraversion": 0.67,
+        "agreeableness": 0.47,
+        "neuroticism": 0.5
+      },
+      "final_simoleons": 2753.8,
+      "arc_activations": {
+        "lonely": 0,
+        "burnout": 0,
+        "grief": 0
+      }
+    },
+    {
+      "name": "Robert Thomas",
+      "ocean_baseline": {
+        "openness": 0.46,
+        "conscientiousness": 0.52,
+        "extraversion": 0.56,
+        "agreeableness": 0.58,
+        "neuroticism": 0.46
+      },
+      "ocean_final": {
+        "openness": 0.46,
+        "conscientiousness": 0.52,
+        "extraversion": 0.56,
+        "agreeableness": 0.58,
+        "neuroticism": 0.46
+      },
+      "final_simoleons": 4311.9,
+      "arc_activations": {
+        "lonely": 1,
+        "burnout": 0,
+        "grief": 0
+      }
+    }
+  ]
+}

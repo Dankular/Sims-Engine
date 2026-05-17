@@ -66,8 +66,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--story",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Enable or disable story narration + TTS after each tick (default: enabled)",
+        default=False,
+        help="Enable or disable story narration + TTS after each tick (default: disabled)",
     )
     p.add_argument(
         "--narrate-every",
@@ -212,6 +212,7 @@ def _run_realtime(engine, args, tracker, exporter, story_runner) -> None:
 
     if _RICH:
         from rich.console import Console
+
         _con = Console()
         _con.print(
             f"\n[bold bright_cyan]REALTIME MODE[/]  "
@@ -220,8 +221,10 @@ def _run_realtime(engine, args, tracker, exporter, story_runner) -> None:
             f"1 sim year ≈ [bold]{years_est:.0f}s[/] real\n"
         )
     else:
-        print(f"\n[REALTIME] speed={speed_lbl}  fps={args.fps}  "
-              f"1 sim year ≈ {years_est:.0f}s real\n")
+        print(
+            f"\n[REALTIME] speed={speed_lbl}  fps={args.fps}  "
+            f"1 sim year ≈ {years_est:.0f}s real\n"
+        )
 
     try:
         while not rt.all_sims_dead:
@@ -256,10 +259,12 @@ def _run_realtime(engine, args, tracker, exporter, story_runner) -> None:
         exporter.flush_now()
 
     from display import print_summary
+
     print_summary(engine)
 
     if tracker:
         from analytics.report import generate
+
         print("\n[INFO] Generating analytics report...")
         report_dir = generate(tracker, output_dir=args.analytics_dir)
         print(f"[INFO] Report → {report_dir}\n")
@@ -268,14 +273,15 @@ def _run_realtime(engine, args, tracker, exporter, story_runner) -> None:
 
 
 def _print_realtime_header(state: dict) -> None:
-    sim_lbl  = state.get("sim_label", "")
-    spd_lbl  = state.get("speed_label", "")
-    pending  = state.get("pending_interactions", 0)
-    n_sims   = len(state.get("sims", []))
+    sim_lbl = state.get("sim_label", "")
+    spd_lbl = state.get("speed_label", "")
+    pending = state.get("pending_interactions", 0)
+    n_sims = len(state.get("sims", []))
     pending_str = f"  [yellow]⏳ {pending} pending[/]" if pending else ""
 
     if _RICH:
         from rich.console import Console
+
         Console().rule(
             f"[bold bright_cyan]{sim_lbl}[/]"
             f"  [dim]{spd_lbl}[/]"
@@ -283,12 +289,15 @@ def _print_realtime_header(state: dict) -> None:
             f"{pending_str}"
         )
     else:
-        print(f"\n  [{sim_lbl}]  speed={spd_lbl}  {n_sims} sims  "
-              + (f"⏳{pending}" if pending else ""))
+        print(
+            f"\n  [{sim_lbl}]  speed={spd_lbl}  {n_sims} sims  "
+            + (f"⏳{pending}" if pending else "")
+        )
 
 
 try:
     from rich.console import Console as _RichCheck
+
     _RICH = True
 except ImportError:
     _RICH = False
@@ -429,8 +438,9 @@ def main() -> None:
         from engine.rooms import GLOBAL_ROOM, personal_room, room_label
 
         client_id = args.client_id or _uuid.uuid4().hex
-        room_id   = (
-            personal_room(client_id) if args.room == "personal"
+        room_id = (
+            personal_room(client_id)
+            if args.room == "personal"
             else (args.room or GLOBAL_ROOM)
         )
         print(f"[INFO] Connecting to NATS: {args.nats}")
@@ -479,12 +489,14 @@ def main() -> None:
     _tracker = None
     if args.analytics:
         from analytics.tracker import SimTracker
+
         _tracker = SimTracker(engine)
         print(f"[INFO] Analytics tracking ON → {args.analytics_dir}/\n")
 
     # Ticks-per-year override
     if args.ticks_per_year:
         import config as _cfg
+
         _cfg.TICKS_PER_YEAR = args.ticks_per_year
         print(f"[INFO] Ticks per year: {args.ticks_per_year}\n")
 
@@ -498,6 +510,7 @@ def main() -> None:
         oldest_age = max(s.profile.get("age", 25) for s in sims)
         from config import TICKS_PER_YEAR as TPY
         from core.life_stage import DEATH_AGE_MAX
+
         est_ticks = (DEATH_AGE_MAX - oldest_age) * TPY
         print(
             f"\n[INFO] Running until last sim dies  "
@@ -545,6 +558,7 @@ def main() -> None:
     # Generate analytics report
     if _tracker:
         from analytics.report import generate
+
         print("\n[INFO] Generating analytics report...")
         report_dir = generate(_tracker, output_dir=args.analytics_dir)
         print(f"[INFO] Report saved → {report_dir}\n")

@@ -28,7 +28,7 @@ GRIEF_STAGES = [
     ("depression",  "grief",        0.15),   # stage 3
     ("acceptance",  "relief",       0.60),   # stage 4
 ]
-GRIEF_TICKS_PER_STAGE = 2
+GRIEF_TICKS_PER_STAGE = 8     # 40 ticks total across 5 stages (~realistic arc)
 GRIEF_ENERGY_PENALTY  = 0.5   # extra energy decay multiplier during grief
 GRIEF_SOCIAL_PENALTY  = 0.6   # extra social decay during grief
 
@@ -55,9 +55,10 @@ def grief_tick(sim: "Sim") -> None:
         sim._grief_tick_count = 0
         sim.grief_stage += 1
         if sim.grief_stage >= len(GRIEF_STAGES):
-            # Arc complete — final acceptance
+            # Arc complete — grief_target intentionally kept so the engine's
+            # post-grief recovery block can detect social depletion and set
+            # grief:recovery goal.  Cleared by the engine once social >= 30.
             sim.grief_stage = -1
-            sim.grief_target = ""
             sim.emotion.add("relief", 0.5, duration=6, source="grief:accepted")
 
 
@@ -99,7 +100,11 @@ def loneliness_tick(sim: "Sim", had_interaction: bool) -> None:
 
 
 def is_lonely(sim: "Sim") -> bool:
-    return getattr(sim, "_social_drought_ticks", 0) >= LONELINESS_THRESHOLD
+    # Drought-based OR social need critically depleted — whichever fires first
+    return (
+        getattr(sim, "_social_drought_ticks", 0) >= LONELINESS_THRESHOLD
+        or sim.needs.social < 20
+    )
 
 
 # ── 3. BURNOUT ARC ────────────────────────────────────────────────────────────

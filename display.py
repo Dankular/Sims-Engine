@@ -130,6 +130,13 @@ def _arc_badge(sim) -> str:
         stages = ["deny", "anger", "barg", "dep", "accept"]
         lbl = stages[min(stage, 4)]
         return f"[bold bright_blue]GRIEF:{lbl}[/]"
+    # Post-grief isolation: arc done but social still depleted
+    if (
+        getattr(sim, "grief_stage", -1) == -1
+        and getattr(sim, "grief_target", "")
+        and sim.needs.social < 30
+    ):
+        return "[bold bright_blue]ISOLATED[/]"
     if getattr(sim, "_burnout_active", False):
         return "[bold bright_red]BURNOUT[/]"
     if is_lonely(sim):
@@ -466,16 +473,20 @@ def _on_career_event(engine: "SimEngine", **kw) -> None:
 
 
 def _on_life_event(engine: "SimEngine", **kw) -> None:
-    sim_a = kw["sim_a"]
-    result = kw["result"]
+    sim_a = kw.get("sim_a") or kw.get("primary")
+    result = kw.get("result") or {
+        "event_type": kw.get("event_type", "life event"),
+        "narrative": kw.get("narrative", ""),
+    }
     etype = result.get("event_type", "life event")
+    sim_name = getattr(sim_a, "name", "Unknown Sim")
     if _RICH:
         _console.print(
-            f"\n  [bold bright_magenta]🌟 LIFE EVENT[/] [{etype}] — [bold]{sim_a.name}[/]\n"
+            f"\n  [bold bright_magenta]🌟 LIFE EVENT[/] [{etype}] — [bold]{sim_name}[/]\n"
             f"  [italic]{result.get('narrative', '')[:160]}[/]"
         )
     else:
-        print(f"\n  🌟 LIFE EVENT [{etype}] — {sim_a.name}")
+        print(f"\n  🌟 LIFE EVENT [{etype}] — {sim_name}")
 
 
 def _on_child_born(engine: "SimEngine", **kw) -> None:
@@ -494,13 +505,15 @@ def _on_child_born(engine: "SimEngine", **kw) -> None:
 
 
 def _on_stage_transition(engine: "SimEngine", **kw) -> None:
-    sim   = kw["sim"]
-    old   = kw["old_stage"].replace("_", " ")
-    new   = kw["new_stage"].replace("_", " ")
-    age   = kw["age"]
+    sim = kw["sim"]
+    old = kw["old_stage"].replace("_", " ")
+    new = kw["new_stage"].replace("_", " ")
+    age = kw["age"]
     stage_colour = {
-        "teen": "yellow", "young adult": "bright_cyan",
-        "adult": "bright_white", "elder": "bright_blue",
+        "teen": "yellow",
+        "young adult": "bright_cyan",
+        "adult": "bright_white",
+        "elder": "bright_blue",
     }.get(new, "white")
     if _RICH:
         _console.print(
@@ -517,7 +530,7 @@ def _on_sim_died(engine: "SimEngine", **kw) -> None:
     if _RICH:
         _console.rule(
             f"[bold bright_black]  ✝  {sim.name}  passed away at age {age}  "
-            f"[dim]{sim.profile.get('aspiration','?')} aspiration[/]",
+            f"[dim]{sim.profile.get('aspiration', '?')} aspiration[/]",
             style="bright_black",
         )
     else:
@@ -531,11 +544,11 @@ def attach(engine: "SimEngine") -> None:
     engine._bus.on(
         "interaction_resolved", lambda **kw: _on_interaction_resolved(engine, **kw)
     )
-    engine._bus.on("career_event",     lambda **kw: _on_career_event(engine, **kw))
-    engine._bus.on("life_event",       lambda **kw: _on_life_event(engine, **kw))
-    engine._bus.on("child_born",       lambda **kw: _on_child_born(engine, **kw))
+    engine._bus.on("career_event", lambda **kw: _on_career_event(engine, **kw))
+    engine._bus.on("life_event", lambda **kw: _on_life_event(engine, **kw))
+    engine._bus.on("child_born", lambda **kw: _on_child_born(engine, **kw))
     engine._bus.on("stage_transition", lambda **kw: _on_stage_transition(engine, **kw))
-    engine._bus.on("sim_died",         lambda **kw: _on_sim_died(engine, **kw))
+    engine._bus.on("sim_died", lambda **kw: _on_sim_died(engine, **kw))
 
 
 # ── Plain-text fallbacks (if rich not installed) ──────────────────────────────

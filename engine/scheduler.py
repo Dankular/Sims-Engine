@@ -2,6 +2,13 @@ import random
 from typing import TYPE_CHECKING, Optional
 
 from config import INTERACTION_TYPES, REL_ACQUAINTANCE, REL_FRIEND
+from core.traits import (
+    interaction_weight_modifier,
+    trait_blocks_interaction,
+    trait_unlocks,
+)
+from core.social_chemistry import calculate_chemistry
+from core.species import can_perform_interaction
 
 if TYPE_CHECKING:
     from core.sim import Sim
@@ -17,10 +24,10 @@ for _cat, _actions in INTERACTION_TYPES.items():
 # NLI label → INTERACTION_TYPES category
 _NLI_LABEL_TO_CAT: dict[str, str] = {
     "deep emotional conversation about feelings or fears": "deep",
-    "romantic or flirtatious interaction":                 "romantic",
-    "playful funny casual interaction":                    "funny",
-    "hostile argumentative confrontation":                 "mean",
-    "casual friendly conversation":                        "friendly",
+    "romantic or flirtatious interaction": "romantic",
+    "playful funny casual interaction": "funny",
+    "hostile argumentative confrontation": "mean",
+    "casual friendly conversation": "friendly",
 }
 _NLI_INTERACTION_LABELS = list(_NLI_LABEL_TO_CAT.keys())
 
@@ -84,6 +91,7 @@ def choose_interaction(
     if goal is not None:
         try:
             from core.goals import is_goal_valid, goal_to_interaction
+
             if (
                 is_goal_valid(goal, current_tick)
                 and goal.target_sim == sim_b.sim_id
@@ -95,6 +103,7 @@ def choose_interaction(
 
     friendship_score = relationship.friendship
     romance_score = relationship.romance
+    chem = calculate_chemistry(sim_a, sim_b)
     mood = sim_a.emotion.dominant_valence
     ocean = sim_a.ocean
     candidates: list[tuple[str, float]] = []
@@ -142,9 +151,12 @@ def choose_interaction(
                 candidates.append(
                     (action, 0.5 * (ocean["extraversion"] + ocean["openness"]) / 2)
                 )
+            if chem.chemistry >= 35:
+                candidates.append(("hold hands", 1.0))
+            if chem.chemistry <= -25:
+                candidates.append(("chat", 0.2))
             _both_adult = (
-                sim_a.profile.get("age", 0) >= 16
-                and sim_b.profile.get("age", 0) >= 16
+                sim_a.profile.get("age", 0) >= 16 and sim_b.profile.get("age", 0) >= 16
             )
             if romance_score >= 65 and "intimate" in INTERACTION_TYPES and _both_adult:
                 for action in INTERACTION_TYPES["intimate"]:
@@ -152,6 +164,62 @@ def choose_interaction(
 
     for special in sim_a.skills.unlocked_interactions():
         candidates.append((special, 1.2))
+
+    # ── Grief / isolation support bias ───────────────────────────────────────
+    _grief_active = getattr(sim_a, "grief_stage", -1) >= 0
+    _post_grief_isolated = (
+        getattr(sim_a, "grief_stage", -1) == -1
+        and getattr(sim_a, "grief_target", "")
+        and sim_a.needs.social < 30
+    )
+    if _grief_active or _post_grief_isolated:
+        # Heavily push toward deep/supportive interactions
+        for action in INTERACTION_TYPES.get("deep", []):
+            candidates.append((action, 1.5))
+        candidates.append(("share feelings about recent loss", 2.0))
+        candidates.append(("ask for emotional support", 1.8))
+        candidates.append(("confide in someone trusted", 1.6))
+        # Suppress mean/funny — inappropriate while grieving.
+        # Match the full "mean" + "funny" category sets and common comedy keywords.
+        _grief_suppress_set = (
+            set(INTERACTION_TYPES.get("mean", []))
+            | set(INTERACTION_TYPES.get("funny", []))
+        )
+        _grief_suppress_kw = (
+            "insult", "mock", "roast", "prank", "joke", "impression",
+            "meme", "tease", "argue", "rumour", "bully", "taunt", "comedy",
+        )
+        candidates = [
+            (a, w * 0.1)
+            if a in _grief_suppress_set or any(k in a for k in _grief_suppress_kw)
+            else (a, w)
+            for a, w in candidates
+        ]
+    # Also push sim_b to offer support if sim_a is visibly suffering
+    _other_grief = getattr(sim_b, "grief_stage", -1) >= 0 or (
+        getattr(sim_b, "grief_stage", -1) == -1
+        and getattr(sim_b, "grief_target", "")
+        and sim_b.needs.social < 30
+    )
+    if _other_grief:
+        candidates.append(("offer condolences", 2.0))
+        candidates.append(("check in on how they're doing", 1.8))
+        candidates.append(("share a fond memory of what was lost", 1.5))
+
+    # ── Skill-based interaction weighting ────────────────────────────────────
+    skill_boost_map = {
+        "comedy": ("funny", 0.4),
+        "charisma": ("friendly", 0.3),
+        "fitness": ("friendly", 0.2),
+        "logic": ("deep", 0.3),
+        "mischief": ("mean", 0.3),
+    }
+    for skill_name, (category, boost) in skill_boost_map.items():
+        level = sim_a.skills.levels.get(skill_name, 0)
+        if level >= 3 and category in INTERACTION_TYPES:
+            mod = boost * (level / 10.0)
+            for action in INTERACTION_TYPES[category]:
+                candidates.append((action, mod))
 
     # ── Marriage proposal — unlocked at high romance + no current marriage ────
     if (
@@ -163,34 +231,54 @@ def choose_interaction(
         candidates.append(("propose marriage", 0.8))
 
     # ── Interest-match bonding ────────────────────────────────────────────────
-    if datasets is not None and hasattr(datasets, "interests_data") and datasets.interests_data:
+    if (
+        datasets is not None
+        and hasattr(datasets, "interests_data")
+        and datasets.interests_data
+    ):
         interests_a = set(sim_a.profile.get("interests", []))
         interests_b = set(sim_b.profile.get("interests", []))
         shared = interests_a & interests_b
-        solo   = interests_a - interests_b  # only sim_a has it
+        solo = interests_a - interests_b  # only sim_a has it
 
         # Shared interest — highest weight (mutual passion)
         if shared and random.random() < 0.25:
             interest = random.choice(list(shared))
-            from datasets.interests import sample_interest_seed, format_interest_interaction
+            from datasets.interests import (
+                sample_interest_seed,
+                format_interest_interaction,
+            )
+
             seed = sample_interest_seed(interest, datasets.interests_data)
             if seed:
                 bonus = 0.3 if len(shared) > 1 else 0.0
-                candidates.append((
-                    format_interest_interaction(seed, sim_a.name, sim_b.name, shared=True),
-                    1.5 + bonus,
-                ))
+                candidates.append(
+                    (
+                        format_interest_interaction(
+                            seed, sim_a.name, sim_b.name, shared=True
+                        ),
+                        1.5 + bonus,
+                    )
+                )
 
         # Solo interest — lower weight (one-sided enthusiasm)
         elif solo and random.random() < 0.12:
             interest = random.choice(list(solo))
-            from datasets.interests import sample_interest_seed, format_interest_interaction
+            from datasets.interests import (
+                sample_interest_seed,
+                format_interest_interaction,
+            )
+
             seed = sample_interest_seed(interest, datasets.interests_data)
             if seed:
-                candidates.append((
-                    format_interest_interaction(seed, sim_a.name, sim_b.name, shared=False),
-                    1.0,
-                ))
+                candidates.append(
+                    (
+                        format_interest_interaction(
+                            seed, sim_a.name, sim_b.name, shared=False
+                        ),
+                        1.0,
+                    )
+                )
 
     # ── Dataset-enhanced seeds ────────────────────────────────────────────────
     if datasets is not None:
@@ -465,8 +553,7 @@ def choose_interaction(
         # Adult tier 1: suggestive but non-explicit intimate register
         # Age-gated: both sims must be >= 16
         _both_of_age = (
-            sim_a.profile.get("age", 0) >= 16
-            and sim_b.profile.get("age", 0) >= 16
+            sim_a.profile.get("age", 0) >= 16 and sim_b.profile.get("age", 0) >= 16
         )
         if (
             romance_score >= 65
@@ -660,15 +747,25 @@ def choose_interaction(
                 candidates.append((format_financial_seed(seed), 1.2))
 
     # Loneliness seed — FIG-Loneliness (when sim_a is socially isolated)
-    if datasets is not None and hasattr(datasets, "loneliness_index") and datasets.loneliness_index:
+    if (
+        datasets is not None
+        and hasattr(datasets, "loneliness_index")
+        and datasets.loneliness_index
+    ):
         try:
             from core.arcs import is_lonely
-            from datasets.loneliness import sample_loneliness_seed, format_loneliness_interaction
+            from datasets.loneliness import (
+                sample_loneliness_seed,
+                format_loneliness_interaction,
+            )
+
             if is_lonely(sim_a):
                 drought = getattr(sim_a, "_social_drought_ticks", 0)
                 seed = sample_loneliness_seed(drought, sim_a.emotion.dominant)
                 if seed:
-                    candidates.append((format_loneliness_interaction(seed, drought), 1.5))
+                    candidates.append(
+                        (format_loneliness_interaction(seed, drought), 1.5)
+                    )
         except Exception:
             pass
 
@@ -703,6 +800,7 @@ def choose_interaction(
         is_interaction_blocked,
         sentiment_unlocked_interactions,
     )
+
     # _blocked_interactions: set by EventEngine consequences (temporary event blocks)
     _event_blocked = set(getattr(sim_a, "_blocked_interactions", []))
 
@@ -711,11 +809,16 @@ def choose_interaction(
         for action, weight in candidates
         if not sim_a.is_on_cooldown(action, current_tick)
         and not is_interaction_blocked(relationship, action)
+        and not trait_blocks_interaction(sim_a, action)
+        and can_perform_interaction(sim_a, action)
         and action not in _event_blocked
     ]
     # Sentiment-unlocked interactions (with boosted weight)
     for unlocked in sentiment_unlocked_interactions(relationship):
         candidates.append((unlocked, 1.8))
+
+    for unlocked in trait_unlocks(sim_a):
+        candidates.append((unlocked, 1.35))
 
     # ── Milestone-unlocked interactions ───────────────────────────────────────
     for unlocked in getattr(sim_a, "_unlocked_interactions", []):
@@ -724,20 +827,21 @@ def choose_interaction(
     # ── Club rule weight modifiers ────────────────────────────────────────────
     try:
         import engine.engine as _eng_mod
+
         if hasattr(_eng_mod, "_current_engine") and _eng_mod._current_engine:
             mods = _eng_mod._current_engine.clubs.interaction_weight_mods(
                 sim_a.sim_id, sim_b.sim_id
             )
             if mods:
                 candidates = [
-                    (a, w * mods[a] if a in mods else w)
-                    for a, w in candidates
+                    (a, w * mods[a] if a in mods else w) for a, w in candidates
                 ]
     except Exception:
         pass
 
     # ── Celebrity fan interaction ─────────────────────────────────────────────
     from config import CELEBRITY_INTERACTION_THRESHOLD
+
     if getattr(sim_b, "celebrity_score", 0) >= CELEBRITY_INTERACTION_THRESHOLD:
         candidates.append(("ask for autograph", 1.2))
         candidates.append(("fan encounter", 1.0))
@@ -752,9 +856,39 @@ def choose_interaction(
 
     # System 1: NLI-based category boosting — emergent routing from Sim state
     candidates = _nli_boost_candidates(sim_a, sim_b, relationship, candidates)
+    candidates = [
+        (action, max(0.01, weight * interaction_weight_modifier(sim_a, action)))
+        for action, weight in candidates
+    ]
+    # Adaptive bandit weighting (phase 1 online learning)
+    try:
+        import engine.engine as _eng_mod
+
+        eng = getattr(_eng_mod, "_current_engine", None)
+        if eng is not None and hasattr(eng, "adaptive_policy"):
+            candidates = [
+                (
+                    action,
+                    max(
+                        0.01,
+                        eng.adaptive_policy.score(sim_a, sim_b, action, float(weight)),
+                    ),
+                )
+                for action, weight in candidates
+            ]
+    except Exception:
+        pass
 
     actions, weights = zip(*candidates)
-    return random.choices(actions, weights=weights, k=1)[0]
+    pick = random.choices(actions, weights=weights, k=1)[0]
+    try:
+        sim_a._last_autonomy_choice = {
+            "selected": pick,
+            "top_candidates": sorted(candidates, key=lambda x: x[1], reverse=True)[:5],
+        }
+    except Exception:
+        pass
+    return pick
 
 
 def _reputation_adjustment(sim_b) -> float:
@@ -764,9 +898,10 @@ def _reputation_adjustment(sim_b) -> float:
     creates mild attraction. Avoidance is intentionally stronger than attraction.
     """
     from config import REPUTATION_SCORE_SCALE, REPUTATION_BOOST_CAP
+
     rep = getattr(sim_b, "reputation_score", 0.0)
-    raw = rep / REPUTATION_SCORE_SCALE          # -0.50 to +0.50
-    return min(raw, REPUTATION_BOOST_CAP)       # cap upward at +0.25
+    raw = rep / REPUTATION_SCORE_SCALE  # -0.50 to +0.50
+    return min(raw, REPUTATION_BOOST_CAP)  # cap upward at +0.25
 
 
 def _memory_bias(rel) -> float:
@@ -776,12 +911,13 @@ def _memory_bias(rel) -> float:
     Negative shared history → drift apart.
     """
     from config import MEMORY_BIAS_LOOKBACK, MEMORY_BIAS_WEIGHT
+
     memories = getattr(rel, "memories", [])
     if not memories:
         return 0.0
     recent = memories[-MEMORY_BIAS_LOOKBACK:]
     avg_valence = sum(m.get("valence", 0.0) for m in recent) / len(recent)
-    return avg_valence * MEMORY_BIAS_WEIGHT     # -0.25 to +0.25
+    return avg_valence * MEMORY_BIAS_WEIGHT  # -0.25 to +0.25
 
 
 def pick_interaction_pair(sims: list["Sim"], relationships: "RelationshipGraph"):
@@ -803,6 +939,7 @@ def pick_interaction_pair(sims: list["Sim"], relationships: "RelationshipGraph")
 
             # Attraction bonus — romantic sims gravitate toward compatible partners
             from core.compatibility import attraction_score as _attr
+
             attr = _attr(sim_a, sim_b)
             attraction_bonus = attr * 0.15  # max ±0.15
 
@@ -811,8 +948,10 @@ def pick_interaction_pair(sims: list["Sim"], relationships: "RelationshipGraph")
             clubs = getattr(sim_a, "_clubs", None)
             try:
                 from world.clubs import ClubManager as _CM
+
                 # Access via engine if available; otherwise skip gracefully
                 import engine.engine as _eng_mod
+
                 if hasattr(_eng_mod, "_current_engine") and _eng_mod._current_engine:
                     club_bonus = _eng_mod._current_engine.clubs.pair_score_bonus(
                         sim_a.sim_id, sim_b.sim_id
@@ -826,10 +965,13 @@ def pick_interaction_pair(sims: list["Sim"], relationships: "RelationshipGraph")
                 + a_pressures.get("social", 0) * 0.2
                 + random.uniform(0, 0.15)
                 # Emergent mechanics — reputation and memory shape who talks to whom
-                + _reputation_adjustment(sim_b)   # avoided if bad rep; sought if good
-                + _memory_bias(rel)               # seek those with positive history
-                + attraction_bonus                # chemistry draws compatible sims
-                + club_bonus                      # club members prefer each other
+                + _reputation_adjustment(sim_b)  # avoided if bad rep; sought if good
+                + _memory_bias(rel)  # seek those with positive history
+                + attraction_bonus  # chemistry draws compatible sims
+                + club_bonus  # club members prefer each other
+                + getattr(sim_a, "autonomy_profile", {}).get("social", 0.0) * 0.08
+                - getattr(sim_a, "autonomy_profile", {}).get("solitude", 0.0) * 0.08
+                + (calculate_chemistry(sim_a, sim_b).chemistry / 100.0) * 0.2
             )
             candidates.append((score, sim_a, sim_b))
     if not candidates:

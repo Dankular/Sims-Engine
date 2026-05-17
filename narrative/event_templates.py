@@ -85,7 +85,8 @@ def _death(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra
     # Household members
     for hid in _all_household_ids(primary_id, engine):
         if hid not in [s for s, _ in c.moodlets]:
-            c.moodlets.append((hid, "heartbroken"))
+            c.moodlets.append((hid, "mourning"))
+            c.moodlets.append((hid, "grief_stricken"))
             c.emotions.append((hid, "grief", 0.9, 20))
     # Interactions unlocked for everyone who knew the deceased
     for fid in _close_friends(primary_id, engine, threshold=30):
@@ -183,7 +184,8 @@ def _job_loss(primary_id: str, secondary_ids: list[str], engine: "SimEngine", ex
 
 def _promotion(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
     c = EventConsequences()
-    c.moodlets.append((primary_id, "proud"))
+    c.moodlets.append((primary_id, "just_promoted"))
+    c.moodlets.append((primary_id, "feeling_confident"))
     c.moodlets.append((primary_id, "on_a_roll"))
     c.emotions.append((primary_id, "pride",      1.0, 12))
     c.emotions.append((primary_id, "excitement", 0.7,  8))
@@ -204,6 +206,8 @@ def _illness(primary_id: str, secondary_ids: list[str], engine: "SimEngine", ext
     intensity_map = {"mild": 0.4, "moderate": 0.6, "severe": 0.9}
     intensity = intensity_map.get(severity, 0.5)
     c.moodlets.append((primary_id, "fighting_illness"))
+    if severity in ("moderate", "severe"):
+        c.moodlets.append((primary_id, "queasy"))
     c.emotions.append((primary_id, "discomfort", intensity, 8))
     c.wants.append((primary_id, "recover quickly and rest"))
     # Household members and close friends can check in
@@ -218,6 +222,7 @@ def _illness(primary_id: str, secondary_ids: list[str], engine: "SimEngine", ext
 def _scandal(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
     c = EventConsequences()
     rep_hit = extra.get("rep_hit", -15.0)
+    c.moodlets.append((primary_id, "publicly_humiliated"))
     c.moodlets.append((primary_id, "stressed"))
     c.moodlets.append((primary_id, "embarrassed"))
     c.emotions.append((primary_id, "embarrassment", 0.8, 12))
@@ -326,7 +331,8 @@ def _gig_success(primary_id: str, secondary_ids: list[str], engine: "SimEngine",
 
 def _property_bought(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
     c = EventConsequences()
-    c.moodlets.append((primary_id, "proud"))
+    c.moodlets.append((primary_id, "new_home"))
+    c.moodlets.append((primary_id, "property_owner"))
     c.moodlets.append((primary_id, "energised"))
     c.emotions.append((primary_id, "pride",    0.7, 10))
     c.reputation_deltas.append((primary_id, 5.0))
@@ -363,6 +369,7 @@ def _betrayal(primary_id: str, secondary_ids: list[str], engine: "SimEngine", ex
     if victim_id:
         c.sentiments.append((victim_id, betrayer_id, "betrayal"))
         c.relationship_deltas.append((victim_id, betrayer_id, -25.0, -15.0))
+        c.moodlets.append((victim_id, "betrayed"))
         c.moodlets.append((victim_id, "heartbroken"))
         c.emotions.append((victim_id, "grief", 0.8, 12))
         c.emotions.append((victim_id, "anger", 0.7,  8))
@@ -370,6 +377,7 @@ def _betrayal(primary_id: str, secondary_ids: list[str], engine: "SimEngine", ex
         c.interactions_blocked.append((victim_id, "confide"))
         c.interactions_blocked.append((victim_id, "share secret"))
     c.reputation_deltas.append((betrayer_id, -12.0))
+    c.moodlets.append((betrayer_id, "guilty"))
     c.moodlets.append((betrayer_id, "stressed"))
     c.interactions_unlocked.append((betrayer_id, "sincerely apologise for recent hurtful behaviour"))
     for wid in secondary_ids:
@@ -382,8 +390,10 @@ def _cheating_accusation(primary_id: str, secondary_ids: list[str], engine: "Sim
     c = EventConsequences()
     accused_id  = primary_id
     accuser_id  = secondary_ids[0] if secondary_ids else ""
+    c.moodlets.append((accused_id, "wrongfully_accused"))
     c.moodlets.append((accused_id, "embarrassed"))
-    c.moodlets.append((accuser_id, "stressed"))
+    c.moodlets.append((accuser_id, "cheated_on"))
+    c.moodlets.append((accuser_id, "furious"))
     c.emotions.append((accused_id, "nervousness", 0.7, 10))
     c.emotions.append((accuser_id, "anger",       0.8,  8))
     c.reputation_deltas.append((accused_id, -10.0))
@@ -431,7 +441,8 @@ def _rivalry_escalation(primary_id: str, secondary_ids: list[str], engine: "SimE
 
 def _public_embarrassment(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
     c = EventConsequences()
-    c.moodlets.append((primary_id, "embarrassed"))
+    c.moodlets.append((primary_id, "mortified"))
+    c.moodlets.append((primary_id, "publicly_humiliated"))
     c.emotions.append((primary_id, "embarrassment", 0.8, 12))
     c.emotions.append((primary_id, "nervousness",   0.5,  8))
     c.reputation_deltas.append((primary_id, -8.0))
@@ -620,7 +631,8 @@ def _social_exclusion(primary_id: str, secondary_ids: list[str], engine: "SimEng
     c.reputation_deltas.append((primary_id, -5.0))
     c.emotions.append((primary_id, "pride", 0.3, 3))
     if excluded_id:
-        c.moodlets.append((excluded_id, "uncomfortable"))
+        c.moodlets.append((excluded_id, "lonely"))
+        c.moodlets.append((excluded_id, "social_isolation"))
         c.emotions.append((excluded_id, "sadness",     0.7, 10))
         c.emotions.append((excluded_id, "nervousness", 0.5,  7))
         c.relationship_deltas.append((excluded_id, primary_id, -10.0, -5.0))
@@ -759,6 +771,8 @@ def _life_stage_transition(primary_id: str, secondary_ids: list[str], engine: "S
 
 def _midlife_crisis(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
     c = EventConsequences()
+    c.moodlets.append((primary_id, "in_a_slump"))
+    c.moodlets.append((primary_id, "stir_crazy"))
     c.moodlets.append((primary_id, "stressed"))
     c.emotions.append((primary_id, "nervousness", 0.7, 15))
     c.emotions.append((primary_id, "disappointment", 0.5, 10))
@@ -973,8 +987,9 @@ def _graduation(primary_id: str, secondary_ids: list[str], engine: "SimEngine", 
 
 def _chronic_stress(primary_id: str, secondary_ids: list[str], engine: "SimEngine", extra: dict) -> EventConsequences:
     c = EventConsequences()
+    c.moodlets.append((primary_id, "fighting_burnout"))
+    c.moodlets.append((primary_id, "overwhelmed"))
     c.moodlets.append((primary_id, "stressed"))
-    c.moodlets.append((primary_id, "fighting_illness"))
     c.emotions.append((primary_id, "nervousness", 0.7, 15))
     c.emotions.append((primary_id, "discomfort",  0.5, 10))
     sim = engine._sim_lookup.get(primary_id)

@@ -1,1 +1,0 @@
-"""Sims Engine — Pygame frontend."""

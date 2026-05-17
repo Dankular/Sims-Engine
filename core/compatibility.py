@@ -15,9 +15,11 @@ Used in:
   - engine/scheduler.py choose_interaction     → unlocks romantic actions earlier
   - engine/engine.py   get_state()             → exposed per-pair
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from core.traits import trait_compatibility_bonus
 
 if TYPE_CHECKING:
     from core.sim import Sim
@@ -31,8 +33,8 @@ def attraction_score(sim_a: "Sim", sim_b: "Sim") -> float:
     """
     ocean_a = sim_a.ocean
     ocean_b = sim_b.ocean
-    p_a     = sim_a.profile
-    p_b     = sim_b.profile
+    p_a = sim_a.profile
+    p_b = sim_b.profile
 
     score = 0.0
 
@@ -42,13 +44,15 @@ def attraction_score(sim_a: "Sim", sim_b: "Sim") -> float:
 
     # Extraversion: slight opposites attract (introvert + extrovert balance)
     ext_diff = abs(ocean_a["extraversion"] - ocean_b["extraversion"])
-    score += (0.5 - abs(ext_diff - 0.3)) * 0.08   # peak at 0.3 difference
+    score += (0.5 - abs(ext_diff - 0.3)) * 0.08  # peak at 0.3 difference
 
     # Agreeableness: both high = very compatible; both low = friction
     score += (ocean_a["agreeableness"] + ocean_b["agreeableness"]) / 2 * 0.08
 
     # Conscientiousness: similarity reduces conflict
-    score += (1.0 - abs(ocean_a["conscientiousness"] - ocean_b["conscientiousness"])) * 0.05
+    score += (
+        1.0 - abs(ocean_a["conscientiousness"] - ocean_b["conscientiousness"])
+    ) * 0.05
 
     # Neuroticism: both high = volatile pairing (penalty); one stable = buffer
     n_avg = (ocean_a["neuroticism"] + ocean_b["neuroticism"]) / 2
@@ -62,8 +66,8 @@ def attraction_score(sim_a: "Sim", sim_b: "Sim") -> float:
         score += jaccard * 0.25
 
     # ── Likes/dislikes compatibility (20% of score) ───────────────────────────
-    likes_a    = set(p_a.get("likes", []))
-    likes_b    = set(p_b.get("likes", []))
+    likes_a = set(p_a.get("likes", []))
+    likes_b = set(p_b.get("likes", []))
     dislikes_a = set(p_a.get("dislikes", []))
     dislikes_b = set(p_b.get("dislikes", []))
 
@@ -107,6 +111,9 @@ def attraction_score(sim_a: "Sim", sim_b: "Sim") -> float:
     if mbti_a and mbti_b and len(mbti_a) == 4 and len(mbti_b) == 4:
         score += _mbti_bonus(mbti_a, mbti_b) * 0.10
 
+    # Trait compatibility/conflict layer
+    score += trait_compatibility_bonus(sim_a, sim_b)
+
     return max(-1.0, min(1.0, round(score, 3)))
 
 
@@ -123,10 +130,16 @@ def _mbti_bonus(a: str, b: str) -> float:
 
 # ── Compatibility label ───────────────────────────────────────────────────────
 
+
 def compatibility_label(score: float) -> str:
-    if score >= 0.60:  return "soulmates"
-    if score >= 0.35:  return "great match"
-    if score >= 0.15:  return "good chemistry"
-    if score >= -0.10: return "neutral"
-    if score >= -0.35: return "friction"
+    if score >= 0.60:
+        return "soulmates"
+    if score >= 0.35:
+        return "great match"
+    if score >= 0.15:
+        return "good chemistry"
+    if score >= -0.10:
+        return "neutral"
+    if score >= -0.35:
+        return "friction"
     return "incompatible"

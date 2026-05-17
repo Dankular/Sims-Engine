@@ -86,6 +86,13 @@ class SimEngine:
         self.memory_store = MemoryStore()
         self.wants_engine = WantsEngine()
         self.gossip = GossipGraph()
+        from core.milestones import MilestoneRegistry
+        from core.opportunities import OpportunityManager
+        from core.ancestry import AncestryLedger
+
+        self.milestones = MilestoneRegistry()
+        self.opportunities = OpportunityManager()
+        self.ancestry = AncestryLedger()
 
         self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=ADJ_WORKERS)
         self._pending: list[PendingInteraction] = []
@@ -138,15 +145,63 @@ class SimEngine:
         self.drama = DramaCascade()
         self.pregnancy = PregnancySystem()
 
-        # Attach moodlets to all sims
-        from core.moodlets import MoodletStack
+        # moodlets, career_id, career_days, _sleeping, _last_dream
+        # are all initialised in Sim.__init__ — nothing to do here.
+
+        from world.dreams import DreamSystem
+
+        self.dream_system = DreamSystem()
+
+        from world.career_manager import CareerManager as _CareerManager
+        from world.cleanliness import CleanlinessSystem
+        from world.programming import ProgrammingSystem
+        from world.cooking import CookingSystem
+        from world.wellness import WellnessSystem
+        from world.skill_classes import SkillClassSystem
+        from world.life_state import LifeStateSystem
+        from world.neighborhoods import NeighborhoodSystem
+        from world.objects import ObjectManager
+
+        self.career_manager = _CareerManager()
+        self.cleanliness = CleanlinessSystem()
+        self.programming = ProgrammingSystem()
+        self.cooking = CookingSystem()
+        self.wellness = WellnessSystem()
+        self.skill_classes = SkillClassSystem()
+        self.life_states = LifeStateSystem()
+        self.neighborhoods = NeighborhoodSystem()
+        self.objects = ObjectManager()
+
+        # Seed world lots and sim inventories from object catalog (if available)
+        lot_ids = [
+            lot.lot_id
+            for district in self.neighborhoods.world.districts
+            for neighborhood in district.neighborhoods
+            for lot in neighborhood.lots
+        ]
+        lot_rules = {
+            lot.lot_id: {
+                "type": lot.type,
+                "venue_assignment": lot.venue_assignment,
+            }
+            for district in self.neighborhoods.world.districts
+            for neighborhood in district.neighborhoods
+            for lot in neighborhood.lots
+        }
+        self.objects.assign_world_objects(lot_ids, lot_rules=lot_rules)
         for sim in self.sims:
-            if not hasattr(sim, "moodlets"):
-                sim.moodlets = MoodletStack()
+            self.objects.assign_sim_inventory(sim)
 
         # Central life event engine (P0 context-aware framework)
         from narrative.event_engine import EventEngine as _EventEngine
+
         self.event_engine = _EventEngine()
+        from core.lifetime_aspirations import AspirationSystem
+
+        self.aspiration_system = AspirationSystem()
+        from core.adaptive_policy import AdaptiveBandit
+
+        self.adaptive_policy = AdaptiveBandit()
 
         self._bus.on("tick_complete", self._on_tick_complete)
         assign_lod_tiers(self.sims)
@@ -244,6 +299,22 @@ class SimEngine:
                     closest_id = self._find_closest_friend_id(sim)
                     if closest_id:
                         set_goal_from_arc(sim, arc_key, closest_id, self._tick_count)
+                # Post-grief recovery: arc completed but still socially depleted
+                elif (
+                    sim.grief_stage == -1
+                    and getattr(sim, "grief_target", "")
+                ):
+                    if sim.needs.social >= 30:
+                        # Social has recovered — exit recovery state entirely
+                        sim.grief_target = ""
+                    elif not getattr(sim, "_active_goal", None):
+                        closest_id = self._find_closest_friend_id(sim)
+                        if closest_id:
+                            set_goal_from_arc(
+                                sim, "grief:recovery", closest_id, self._tick_count
+                            )
+                            if hasattr(sim, "moodlets"):
+                                sim.moodlets.add("lonely", source="post_grief_isolation")
                 # Loneliness → seek comfort goal
                 from core.arcs import is_lonely
 
@@ -305,25 +376,55 @@ class SimEngine:
 
         for sim in self.sims:
             n = sim.needs
+            autonomy = getattr(sim, "autonomy_profile", {})
+            rest_bias = max(
+                0.8,
+                min(
+                    1.25,
+                    1.0
+                    - autonomy.get("career_focus", 0.0) * 0.2
+                    + autonomy.get("leisure", 0.0) * 0.2,
+                ),
+            )
+            social_bias = max(
+                0.8,
+                min(
+                    1.2,
+                    1.0
+                    + autonomy.get("social", 0.0) * 0.2
+                    - autonomy.get("solitude", 0.0) * 0.15,
+                ),
+            )
 
             # Sleep — start when energy critically low, continue until wake threshold
             if n.energy < SLEEP_ENERGY_THRESHOLD:
                 if not getattr(sim, "_sleeping", False):
                     sim._sleeping = True
                     sim.emotion.add("relief", 0.3, duration=3, source="sleep")
-                n.energy = min(100.0, n.energy + SLEEP_ENERGY_RESTORE)
+                n.energy = min(100.0, n.energy + SLEEP_ENERGY_RESTORE * rest_bias)
             elif getattr(sim, "_sleeping", False):
                 if n.energy >= SLEEP_WAKE_THRESHOLD:
                     sim._sleeping = False
                     sim.emotion.add("optimism", 0.4, duration=4, source="well_rested")
+                    if hasattr(sim, "moodlets"):
+                        sim.moodlets.add("well_rested", source="sleep")
                 else:
-                    n.energy = min(
-                        100.0, n.energy + SLEEP_ENERGY_RESTORE
-                    )  # keep sleeping
+                    n.energy = min(100.0, n.energy + SLEEP_ENERGY_RESTORE * rest_bias)
+
+            # Exhaustion moodlet when critically tired
+            if hasattr(sim, "moodlets") and n.energy < 15:
+                sim.moodlets.add("exhausted", source="low_energy")
 
             # Basic at-home eating
             if n.hunger < HUNGER_HOME_THRESHOLD:
-                n.hunger = min(100.0, n.hunger + HUNGER_HOME_RESTORE)
+                before = n.hunger
+                n.hunger = min(
+                    100.0, n.hunger + HUNGER_HOME_RESTORE * (0.95 + social_bias * 0.05)
+                )
+                if hasattr(sim, "moodlets") and before < 20 and n.hunger >= 50:
+                    sim.moodlets.add("full_and_happy", source="ate")
+            elif hasattr(sim, "moodlets") and n.hunger < 20:
+                sim.moodlets.add("hungry_pangs", source="low_hunger")
 
             # Bathroom
             if n.bladder < BLADDER_FLUSH_THRESHOLD:
@@ -331,7 +432,16 @@ class SimEngine:
 
             # Quick shower
             if n.hygiene < HYGIENE_SHOWER_THRESHOLD:
+                before_h = n.hygiene
                 n.hygiene = min(100.0, n.hygiene + HYGIENE_RESTORE)
+                if hasattr(sim, "moodlets") and before_h < 30 and n.hygiene >= 60:
+                    sim.moodlets.add("freshly_groomed", source="shower")
+            elif hasattr(sim, "moodlets") and n.hygiene < 20:
+                sim.moodlets.add("stinky", source="low_hygiene")
+
+            # Dreams — fire once per tick while sleeping
+            if getattr(sim, "_sleeping", False):
+                self.dream_system.try_dream(sim, self)
 
         # Shop visits for critically low needs
         from world.economy import visit_shop
@@ -374,6 +484,10 @@ class SimEngine:
             if self._network
             else []
         )
+
+        # Player-directed control has priority over autonomous selection.
+        self._process_control_directives()
+
         if len(candidates) >= 2 and not self._pending:
             pair = pick_interaction_pair(candidates, self.relationships)
             if pair:
@@ -414,6 +528,7 @@ class SimEngine:
         self._try_adoption_event()
         self._process_illness_and_transmission()
         self._process_temperature_risk(hour)
+        self.opportunities.tick(self)
         self._process_family_planning()
         self._run_custody_schedule()
         self._run_gig_economy()
@@ -518,11 +633,33 @@ class SimEngine:
         self.calendar.tick(self)
         self.illness.tick(self)
         self.pregnancy.tick(self)
+        self.career_manager.tick(self)
+        self.cleanliness.tick(self)
+        self.programming.tick(self)
+        self.cooking.tick(self)
+        self.wellness.tick(self)
+        self.skill_classes.tick(self)
+        self.life_states.tick(self)
+        self.neighborhoods.tick(self)
 
         # Tick moodlets on all sims
         for sim in self.sims:
             if hasattr(sim, "moodlets"):
                 sim.moodlets.tick()
+                deadly = sim.moodlets.deadly_emotion()
+                if deadly and random.random() < 0.05:
+                    logger.warning(
+                        "[DeadlyEmotion] %s is at risk: %s", sim.name, deadly
+                    )
+                    # Remove the deadly moodlet (sim survives but it's a close call)
+                    sim.moodlets._moodlets = [
+                        m
+                        for m in sim.moodlets._moodlets
+                        if m.label not in ("enraged", "mortified", "grief_stricken")
+                    ]
+                    sim.emotion.add(
+                        "relief", 0.5, duration=3, source="survived_emotional_crisis"
+                    )
 
         # ── New emergent systems ──────────────────────────────────────────────
 
@@ -561,6 +698,11 @@ class SimEngine:
                         sim.lifetime_wish.description,
                     )
                     self._bus.emit("wish_fulfilled", sim=sim, tick=self._tick_count)
+                if hasattr(sim, "lifetime_wish"):
+                    self.aspiration_system.update_progress_from_wish(
+                        sim, float(getattr(sim.lifetime_wish, "_progress_cache", 0.0))
+                    )
+                self.aspiration_system.tick(sim, self, self._tick_count)
                 newly = tick_aspiration(sim, self, self._tick_count)
                 for ms_label in newly:
                     logger.info("[Milestone] %s achieved: %s", sim.name, ms_label)
@@ -626,9 +768,20 @@ class SimEngine:
                     "fears": [f.label for f in sim.fears],
                     "skills": sim.skills.levels,
                     "inventory": list(sim.inventory),
+                    "inventory_objects": list(getattr(sim, "inventory_objects", [])),
+                    "inventory_weight": self.objects.inventory_weight(sim),
+                    "inventory_capacity": {
+                        "max_slots": int(getattr(sim, "inventory_max_slots", 0)),
+                        "max_weight": float(getattr(sim, "inventory_max_weight", 0.0)),
+                        "slot_limits": dict(getattr(sim, "inventory_slot_limits", {})),
+                    },
                     "properties": list(sim.properties),
                     "health_status": sim.health_status,
                     "temperature_risk": round(sim.temperature_risk, 2),
+                    "internal_temperature": round(
+                        getattr(sim, "internal_temperature", 0.0), 2
+                    ),
+                    "thermal_state": getattr(sim, "thermal_state", "comfortable"),
                     "perk_points": sim.perk_points,
                     "perks": sorted(sim.perks),
                     "active_gig": sim.active_gig,
@@ -670,6 +823,24 @@ class SimEngine:
                     "dominant_moodlet": sim.moodlets.dominant_label()
                     if hasattr(sim, "moodlets")
                     else None,
+                    "career": self.career_manager.career_summary(sim),
+                    "programming_projects": self.programming.project_state(sim.sim_id),
+                    "hacker_reputation": round(
+                        getattr(sim, "hacker_reputation", 0.0), 2
+                    ),
+                    "last_meal_quality": self.cooking.last_meal_quality.get(sim.sim_id),
+                    "wellness_state": self.wellness.state_for(sim.sim_id),
+                    "certificates": self.skill_classes.certificates_for(sim.sim_id),
+                    "ts4_emotion": sim.moodlets.ts4_emotion()
+                    if hasattr(sim, "moodlets")
+                    else "Fine",
+                    "ts4_intensity": sim.moodlets.ts4_intensity()
+                    if hasattr(sim, "moodlets")
+                    else 0,
+                    "ts4_color": sim.moodlets.ts4_color()
+                    if hasattr(sim, "moodlets")
+                    else "#e9e9e9",
+                    "last_dream": getattr(sim, "_last_dream", None),
                     "property_count": len(getattr(sim, "properties", [])),
                     "property_value": round(
                         self.properties.total_portfolio_value(sim.sim_id), 2
@@ -682,8 +853,98 @@ class SimEngine:
                     }
                     if hasattr(sim, "lifetime_wish")
                     else None,
+                    "lifetime_aspiration": {
+                        "id": getattr(
+                            getattr(sim, "lifetime_aspiration", None), "id", ""
+                        ),
+                        "category": getattr(
+                            getattr(sim, "lifetime_aspiration", None), "category", ""
+                        ),
+                        "progress": round(
+                            getattr(
+                                getattr(sim, "lifetime_aspiration", None),
+                                "progress",
+                                0.0,
+                            ),
+                            3,
+                        ),
+                        "completion_state": bool(
+                            getattr(
+                                getattr(sim, "lifetime_aspiration", None),
+                                "completion_state",
+                                False,
+                            )
+                        ),
+                    },
+                    "aspiration_discoveries": list(
+                        getattr(sim, "aspiration_discoveries", [])
+                    ),
+                    "aspiration_fulfillment": {
+                        "life_satisfaction": round(
+                            getattr(
+                                getattr(sim, "aspiration_fulfillment", None),
+                                "life_satisfaction",
+                                50.0,
+                            ),
+                            2,
+                        ),
+                        "aligned_traits_bonus": round(
+                            getattr(
+                                getattr(sim, "aspiration_fulfillment", None),
+                                "aligned_traits_bonus",
+                                0.0,
+                            ),
+                            2,
+                        ),
+                        "failed_goals_penalty": round(
+                            getattr(
+                                getattr(sim, "aspiration_fulfillment", None),
+                                "failed_goals_penalty",
+                                0.0,
+                            ),
+                            2,
+                        ),
+                        "abandoned_goal_penalty": round(
+                            getattr(
+                                getattr(sim, "aspiration_fulfillment", None),
+                                "abandoned_goal_penalty",
+                                0.0,
+                            ),
+                            2,
+                        ),
+                    },
+                    "generated_aspirations": list(
+                        getattr(sim, "generated_aspirations", [])
+                    ),
+                    "completed_aspirations": list(
+                        getattr(sim, "completed_aspirations", [])
+                    ),
                     "club_count": len(getattr(sim, "club_ids", [])),
-                    "known_events": self.event_engine.get_events_known_by(sim.sim_id, limit=5),
+                    "known_events": self.event_engine.get_events_known_by(
+                        sim.sim_id, limit=5
+                    ),
+                    "autonomy_profile": dict(getattr(sim, "autonomy_profile", {})),
+                    "reward_traits": sorted(getattr(sim, "reward_traits", set())),
+                    "death_traits": sorted(getattr(sim, "death_traits", set())),
+                    "temporary_traits": sorted(getattr(sim, "temporary_traits", set())),
+                    "formative_traits": sorted(getattr(sim, "formative_traits", set())),
+                    "trait_knowledge": getattr(sim, "trait_knowledge", {}),
+                    "autonomy_debug": getattr(sim, "_last_autonomy_choice", {}),
+                    "adaptive_policy": self.adaptive_policy.debug_for(
+                        sim.sim_id, limit=8
+                    ),
+                    "control_mode": str(getattr(sim, "control_mode", "autonomous")),
+                    "player_action_queue": list(
+                        getattr(sim, "player_action_queue", [])
+                    ),
+                    "current_directive": getattr(sim, "current_directive", None),
+                    "species": getattr(sim, "occult_type", "human")
+                    if not getattr(sim, "is_ghost", False)
+                    else "ghost",
+                    "life_state_data": self.life_states.state_for(sim),
+                    "milestones": self.milestones.recent_for(sim.sim_id, limit=8),
+                    "opportunities": self.opportunities.for_sim(sim.sim_id),
+                    "ancestry": self.ancestry.lineage_snapshot(sim.sim_id),
                     "relationships": rels,
                 }
             )
@@ -733,8 +994,22 @@ class SimEngine:
             ],
             "pending_events": len(self.social_events.get_pending()),
             "weather": self.weather.state_dict(),
+            "room_cleanliness": self.cleanliness.room_state(),
+            "skill_classes": self.skill_classes.classes_state(),
+            "institution_reputation": dict(self.skill_classes.institution_reputation),
+            "lecture_history": list(self.skill_classes.lecture_history[-25:]),
             "calendar": self.calendar.date_dict(self._tick_count),
             "active_pregnancies": len(self._pregnancies),
+            "legacy": dict(self.aspiration_system.legacy),
+            "world_sim": self.neighborhoods.state_dict(),
+            "world_objects": {
+                lot_id: self.objects.lot_state(lot_id)
+                for lot_id in self.objects.lot_objects.keys()
+            },
+            "world_object_stock": {
+                lot_id: dict(stock)
+                for lot_id, stock in self.objects.lot_object_stock.items()
+            },
         }
 
     def flush_pending(self) -> None:
@@ -794,6 +1069,11 @@ class SimEngine:
             "age": p.get("age", 25),
             "gender": p.get("gender", ""),
             "traits": p.get("traits", []),
+            "reward_traits": sorted(getattr(sim, "reward_traits", set())),
+            "death_traits": sorted(getattr(sim, "death_traits", set())),
+            "temporary_traits": sorted(getattr(sim, "temporary_traits", set())),
+            "formative_traits": sorted(getattr(sim, "formative_traits", set())),
+            "autonomy_profile": dict(getattr(sim, "autonomy_profile", {})),
             "dealbreakers": p.get("dealbreakers", []),
             "aspiration": p.get("aspiration", ""),
             "humor_type": p.get("humor_type", ""),
@@ -1109,6 +1389,10 @@ class SimEngine:
         rel = self.relationships.get(sim_a.sim_id, sim_b.sim_id)
         fd = _to_float(result.get("friendship_delta", 0))
         rd = _to_float(result.get("romance_delta", 0))
+        from core.traits import relationship_growth_multiplier
+
+        fd *= relationship_growth_multiplier(sim_a, "friendship_gain")
+        rd *= relationship_growth_multiplier(sim_a, "romance_gain")
 
         # System 2: Sentiment-modulated deltas — graded outcomes from reaction text
         try:
@@ -1147,6 +1431,18 @@ class SimEngine:
         rel.apply_deltas(fd, rd)
 
         valence = max(-1.0, min(1.0, _to_float(result.get("valence", 0.5), 0.5)))
+        # Online adaptive policy feedback (phase 1 contextual bandit)
+        try:
+            reward = (
+                fd * 0.6
+                + rd * 0.4
+                + valence * 6.0
+                + _to_float(result.get("social_need_restore_a", 0)) * 0.05
+                + _to_float(result.get("fun_restore_a", 0)) * 0.03
+            )
+            self.adaptive_policy.observe(sim_a.sim_id, item.interaction, reward)
+        except Exception:
+            pass
 
         sim_a.needs.restore("social", _to_float(result.get("social_need_restore_a", 0)))
         sim_a.needs.restore("fun", _to_float(result.get("fun_restore_a", 0)))
@@ -1161,9 +1457,20 @@ class SimEngine:
             sim_b.emotion.add(emo_b, 0.7, duration=4, source=item.interaction)
 
         if result.get("charisma_xp_a"):
-            sim_a.skills.gain_xp("charisma", float(result["charisma_xp_a"]))
+            from core.traits import skill_gain_multiplier
+
+            sim_a.skills.gain_xp(
+                "charisma",
+                float(result["charisma_xp_a"])
+                * skill_gain_multiplier(sim_a, "charisma"),
+            )
         if result.get("comedy_xp_a"):
-            sim_a.skills.gain_xp("comedy", float(result["comedy_xp_a"]))
+            from core.traits import skill_gain_multiplier
+
+            sim_a.skills.gain_xp(
+                "comedy",
+                float(result["comedy_xp_a"]) * skill_gain_multiplier(sim_a, "comedy"),
+            )
 
         # System 5: GoEmotions as PRIMARY emotional cascade
         memory_tag = result.get("memory_tag", item.interaction)
@@ -1237,6 +1544,14 @@ class SimEngine:
 
         self.gossip.learn(sim_a.sim_id, sim_b.sim_id, memory_tag)
         self.gossip.learn(sim_b.sim_id, sim_a.sim_id, memory_tag)
+        from core.traits import discover_traits
+
+        social_reveal = any(
+            token in item.interaction.lower()
+            for token in ("confide", "secret", "deep", "story", "advice")
+        )
+        discover_traits(sim_a, sim_b, rel.friendship, social_reveal=social_reveal)
+        discover_traits(sim_b, sim_a, rel.friendship, social_reveal=social_reveal)
         if rel.friendship >= 45 and random.random() < GOSSIP_SPREAD_CHANCE:
             others = [
                 s for s in self.sims if s.sim_id not in (sim_a.sim_id, sim_b.sim_id)
@@ -1244,6 +1559,7 @@ class SimEngine:
             if others:
                 target = random.choice(others)
                 self.gossip.spread(sim_a.sim_id, target.sim_id, sim_b.sim_id)
+                self.gossip.spread_trait_gossip(sim_a, target, sim_b)
 
         # Class 1: AITA reputation — tag negative interactions with community verdict
         if valence < -0.3 and self._datasets and hasattr(self._datasets, "aita_index"):
@@ -1506,30 +1822,38 @@ class SimEngine:
             valence,
         )
         # ── Rumour disproven check ────────────────────────────────────────────
-        if (
-            valence > 0.65
-            and any(kw in item.interaction.lower() for kw in
-                    ('clear the air', 'defend', 'confront', 'reconcile', 'prove'))
+        if valence > 0.65 and any(
+            kw in item.interaction.lower()
+            for kw in ("clear the air", "defend", "confront", "reconcile", "prove")
         ):
             try:
                 from narrative.event_triggers import _rumour_pool
                 from core.event_record import EventType as _ET, Visibility as _V
                 from narrative.event_templates import build_consequences as _bc
                 from core.event_record import LifeEvent as _LE
+
                 for rumour in list(_rumour_pool):
-                    if rumour.get('subject_id') == sim_a.sim_id:
+                    if rumour.get("subject_id") == sim_a.sim_id:
                         _rumour_pool.remove(rumour)
-                        c = _bc(_ET.RUMOUR_DISPROVEN, sim_a.sim_id,
-                                [sim_b.sim_id], self,
-                                extra={'spreader_id': sim_b.sim_id})
+                        c = _bc(
+                            _ET.RUMOUR_DISPROVEN,
+                            sim_a.sim_id,
+                            [sim_b.sim_id],
+                            self,
+                            extra={"spreader_id": sim_b.sim_id},
+                        )
                         ev = _LE.make(
-                            _ET.RUMOUR_DISPROVEN, sim_a.sim_id,
-                            f'{sim_a.name} successfully disproved the rumour against them.',
+                            _ET.RUMOUR_DISPROVEN,
+                            sim_a.sim_id,
+                            f"{sim_a.name} successfully disproved the rumour against them.",
                             self._tick_count,
                             secondary_sim_ids=[sim_b.sim_id],
                             visibility=_V.PUBLIC,
-                            valence=+0.7, intensity=0.6, duration_ticks=20,
-                            consequences=c, source='resolved_interaction',
+                            valence=+0.7,
+                            intensity=0.6,
+                            duration_ticks=20,
+                            consequences=c,
+                            source="resolved_interaction",
                         )
                         self.event_engine.process(ev, self)
                         break
@@ -1541,6 +1865,7 @@ class SimEngine:
         if suggested and isinstance(suggested, dict):
             try:
                 from narrative.event_triggers import EventTriggerSystem
+
                 ev = EventTriggerSystem.from_llm_suggestion(
                     sim_a.sim_id, sim_b.sim_id, suggested, self
                 )
@@ -1548,7 +1873,8 @@ class SimEngine:
                     self.event_engine.process(ev, self)
                     logger.info(
                         "[LLM Event] %s suggested: %s",
-                        sim_a.name, ev.narrative[:60],
+                        sim_a.name,
+                        ev.narrative[:60],
                     )
             except Exception as exc:
                 logger.debug("[LLM Event] parse failed: %s", exc)
@@ -1557,18 +1883,109 @@ class SimEngine:
         self.drama.on_resolved(sim_a, sim_b, valence, item.interaction, self)
 
         # ── Moodlet generation from interaction outcomes ───────────────────────
+        interaction_lower = item.interaction.lower()
+        is_romantic = any(
+            w in interaction_lower
+            for w in (
+                "flirt",
+                "kiss",
+                "romance",
+                "woo",
+                "love",
+                "date",
+                "cuddle",
+                "confess",
+            )
+        )
+        is_creative = any(
+            w in interaction_lower
+            for w in (
+                "paint",
+                "music",
+                "write",
+                "art",
+                "craft",
+                "sing",
+                "guitar",
+                "piano",
+            )
+        )
+        is_conflict = any(
+            w in interaction_lower
+            for w in (
+                "argue",
+                "fight",
+                "insult",
+                "accuse",
+                "betray",
+                "cheat",
+                "yell",
+                "mock",
+            )
+        )
+        is_fun = any(
+            w in interaction_lower
+            for w in ("joke", "play", "game", "laugh", "tease", "prank", "silly")
+        )
+
         if hasattr(sim_a, "moodlets"):
-            if valence > 0.7:
+            if valence > 0.8:
                 sim_a.moodlets.add("on_a_roll", source=item.interaction)
-            elif valence > 0.4:
+                if is_romantic:
+                    sim_a.moodlets.add("head_over_heels", source=item.interaction)
+            elif valence > 0.5:
                 sim_a.moodlets.add("just_had_fun", source=item.interaction)
-            elif valence < -0.5:
-                sim_a.moodlets.add("stressed", source=item.interaction)
+                if is_romantic:
+                    sim_a.moodlets.add("flirty", source=item.interaction)
+                if is_creative:
+                    sim_a.moodlets.add("inspired", source=item.interaction)
+                if is_fun:
+                    sim_a.moodlets.add("feeling_playful", source=item.interaction)
+            elif valence > 0.3:
+                sim_a.moodlets.add("good_vibes", source=item.interaction)
+            elif valence < -0.7:
+                sim_a.moodlets.add(
+                    "furious" if is_conflict else "stressed", source=item.interaction
+                )
+            elif valence < -0.4:
+                sim_a.moodlets.add(
+                    "irritated" if is_conflict else "uncomfortable",
+                    source=item.interaction,
+                )
+
         if hasattr(sim_b, "moodlets"):
-            if valence > 0.7:
+            if valence > 0.8:
                 sim_b.moodlets.add("deeply_connected", source=item.interaction)
-            elif valence < -0.6:
+                if is_romantic:
+                    sim_b.moodlets.add("enchanted", source=item.interaction)
+            elif valence > 0.5:
+                sim_b.moodlets.add("just_had_fun", source=item.interaction)
+                if is_romantic:
+                    sim_b.moodlets.add("flirty", source=item.interaction)
+            elif valence < -0.7:
+                sim_b.moodlets.add(
+                    "mortified" if is_conflict else "stressed", source=item.interaction
+                )
+            elif valence < -0.4:
                 sim_b.moodlets.add("embarrassed", source=item.interaction)
+
+        # ── Skill gain from interaction content ───────────────────────────────
+        for _sim in (sim_a, sim_b):
+            if hasattr(_sim, "skills"):
+                for skill, amount in _sim.skills.gains_from_interaction(
+                    item.interaction
+                ):
+                    from core.traits import skill_gain_multiplier
+
+                    leveled = _sim.skills.gain_xp(
+                        skill, amount * skill_gain_multiplier(_sim, skill)
+                    )
+                    if leveled and hasattr(_sim, "moodlets"):
+                        max_lv = _sim.skills.levels.get(skill, 0) >= 10
+                        _sim.moodlets.add(
+                            "skill_mastered" if max_lv else "proud",
+                            source=f"skill_levelup:{skill}",
+                        )
 
         # ── Sentiments ────────────────────────────────────────────────────────
         from core.sentiments import detect_sentiment, add_sentiment
@@ -1580,10 +1997,26 @@ class SimEngine:
             rel.friendship,
             rel.romance,
             self._tick_count,
+            sim_a=sim_a,
+            sim_b=sim_b,
         )
         for sent_name in triggered:
             if add_sentiment(rel, sent_name, self._tick_count, source=item.interaction):
                 logger.info("[Sentiment] %s↔%s: +%s", sim_a.name, sim_b.name, sent_name)
+                if sent_name in {"first_kiss", "first_love", "betrayal", "heartbreak"}:
+                    if self.milestones.grant(
+                        sim_a.sim_id,
+                        sent_name,
+                        self._tick_count,
+                        source="interaction_sentiment",
+                        meta={"with": sim_b.sim_id},
+                    ):
+                        sim_a.milestones.append(
+                            {"id": sent_name, "tick": self._tick_count}
+                        )
+
+        self._trait_evolution_tick(sim_a, item.interaction, valence)
+        self._trait_evolution_tick(sim_b, result.get("sim_b_reaction", ""), valence)
 
         # ── Marriage proposal check ───────────────────────────────────────────
         if (
@@ -1635,6 +2068,36 @@ class SimEngine:
             interaction=item.interaction,
         )
 
+    def _trait_evolution_tick(self, sim: "Sim", text_hint: str, valence: float) -> None:
+        hint = text_hint.lower()
+        history = getattr(sim, "action_history", {})
+        if "argue" in hint or "insult" in hint:
+            history["conflict"] = history.get("conflict", 0) + 1
+        if "confide" in hint or "advice" in hint or "help" in hint:
+            history["supportive"] = history.get("supportive", 0) + 1
+        if "creative" in hint or "art" in hint or "music" in hint:
+            history["creative"] = history.get("creative", 0) + 1
+        if valence < -0.75:
+            history["trauma"] = history.get("trauma", 0) + 1
+        sim.action_history = history
+
+        if history.get("conflict", 0) >= 6 and "hot-headed" not in sim.profile.get(
+            "traits", []
+        ):
+            sim.add_trait("hot-headed", source="temporary")
+        if history.get("supportive", 0) >= 7 and "good" not in sim.profile.get(
+            "traits", []
+        ):
+            sim.add_trait("good", source="formative")
+        if history.get("creative", 0) >= 7 and "creative" not in sim.profile.get(
+            "traits", []
+        ):
+            sim.add_trait("creative", source="reward")
+        if history.get("trauma", 0) >= 4 and "skeptical" not in sim.profile.get(
+            "traits", []
+        ):
+            sim.add_trait("skeptical", source="temporary")
+
     def _wire_event_bus(self) -> None:
         """
         Subscribe to existing bus events and route them through EventEngine
@@ -1644,86 +2107,282 @@ class SimEngine:
         from core.event_record import LifeEvent, EventType, Visibility
         from narrative.event_templates import build_consequences
 
-        def _make_and_process(event_type, primary_sim, secondary_sims, narrative,
-                               visibility, valence, intensity, duration, extra=None):
+        def _make_and_process(
+            event_type,
+            primary_sim,
+            secondary_sims,
+            narrative,
+            visibility,
+            valence,
+            intensity,
+            duration,
+            extra=None,
+        ):
             primary_id = getattr(primary_sim, "sim_id", "") if primary_sim else ""
             secondary_ids = [getattr(s, "sim_id", "") for s in secondary_sims if s]
             if not primary_id:
                 return
-            c = build_consequences(event_type, primary_id, secondary_ids, self,
-                                   extra=extra or {})
+            c = build_consequences(
+                event_type, primary_id, secondary_ids, self, extra=extra or {}
+            )
             ev = LifeEvent.make(
-                event_type=event_type, primary_sim_id=primary_id,
-                secondary_sim_ids=secondary_ids, narrative=narrative,
-                tick=self._tick_count, visibility=visibility,
-                valence=valence, intensity=intensity, duration_ticks=duration,
-                consequences=c, source="bus_redirect",
+                event_type=event_type,
+                primary_sim_id=primary_id,
+                secondary_sim_ids=secondary_ids,
+                narrative=narrative,
+                tick=self._tick_count,
+                visibility=visibility,
+                valence=valence,
+                intensity=intensity,
+                duration_ticks=duration,
+                consequences=c,
+                source="bus_redirect",
             )
             self.event_engine.process(ev, self)
 
         # Marriage
-        self._bus.on("married", lambda **kw: _make_and_process(
-            EventType.MARRIAGE, kw.get("sim_a"), [kw.get("sim_b")],
-            f"{getattr(kw.get('sim_a'),'name','?')} and {getattr(kw.get('sim_b'),'name','?')} got married!",
-            Visibility.PUBLIC, +0.9, 0.9, 30,
-        ))
+        self._bus.on(
+            "married",
+            lambda **kw: _make_and_process(
+                EventType.MARRIAGE,
+                kw.get("sim_a"),
+                [kw.get("sim_b")],
+                f"{getattr(kw.get('sim_a'), 'name', '?')} and {getattr(kw.get('sim_b'), 'name', '?')} got married!",
+                Visibility.PUBLIC,
+                +0.9,
+                0.9,
+                30,
+            ),
+        )
         # Divorce
-        self._bus.on("divorced", lambda **kw: _make_and_process(
-            EventType.DIVORCE, kw.get("sim_a"), [kw.get("sim_b")],
-            f"{getattr(kw.get('sim_a'),'name','?')} and {getattr(kw.get('sim_b'),'name','?')} divorced.",
-            Visibility.HOUSEHOLD, -0.7, 0.8, 25,
-        ))
+        self._bus.on(
+            "divorced",
+            lambda **kw: _make_and_process(
+                EventType.DIVORCE,
+                kw.get("sim_a"),
+                [kw.get("sim_b")],
+                f"{getattr(kw.get('sim_a'), 'name', '?')} and {getattr(kw.get('sim_b'), 'name', '?')} divorced.",
+                Visibility.HOUSEHOLD,
+                -0.7,
+                0.8,
+                25,
+            ),
+        )
         # Child born
-        self._bus.on("child_born", lambda **kw: _make_and_process(
-            EventType.BIRTH, kw.get("parent_a"), [kw.get("parent_b"), kw.get("child")],
-            f"{getattr(kw.get('child'),'name','?')} was born to "
-            f"{getattr(kw.get('parent_a'),'name','?')} and {getattr(kw.get('parent_b'),'name','?')}!",
-            Visibility.HOUSEHOLD, +0.9, 0.9, 30,
-            extra={"child_id": getattr(kw.get("child"), "sim_id", "")},
-        ))
+        self._bus.on(
+            "child_born",
+            lambda **kw: _make_and_process(
+                EventType.BIRTH,
+                kw.get("parent_a"),
+                [kw.get("parent_b"), kw.get("child")],
+                f"{getattr(kw.get('child'), 'name', '?')} was born to "
+                f"{getattr(kw.get('parent_a'), 'name', '?')} and {getattr(kw.get('parent_b'), 'name', '?')}!",
+                Visibility.HOUSEHOLD,
+                +0.9,
+                0.9,
+                30,
+                extra={"child_id": getattr(kw.get("child"), "sim_id", "")},
+            ),
+        )
         # Sim died
-        self._bus.on("sim_died", lambda **kw: _make_and_process(
-            EventType.DEATH, kw.get("sim"), [],
-            f"{getattr(kw.get('sim'),'name','?')} has passed away at age {kw.get('age','?')}.",
-            Visibility.PUBLIC, -0.9, 1.0, 60,
-        ))
+        self._bus.on(
+            "sim_died",
+            lambda **kw: _make_and_process(
+                EventType.DEATH,
+                kw.get("sim"),
+                [],
+                f"{getattr(kw.get('sim'), 'name', '?')} has passed away at age {kw.get('age', '?')}.",
+                Visibility.PUBLIC,
+                -0.9,
+                1.0,
+                60,
+            ),
+        )
         # Illness update → sick
-        self._bus.on("illness_update", lambda **kw: (
-            _make_and_process(
-                EventType.ILLNESS, kw.get("sim"), [],
-                f"{getattr(kw.get('sim'),'name','?')} fell ill ({kw.get('status','?')}).",
-                Visibility.HOUSEHOLD, -0.5, 0.6, 12,
-                extra={"severity": getattr(kw.get("sim"), "illness_severity", "mild")},
-            ) if kw.get("status") == "sick" else None
-        ))
+        self._bus.on(
+            "illness_update",
+            lambda **kw: (
+                _make_and_process(
+                    EventType.ILLNESS,
+                    kw.get("sim"),
+                    [],
+                    f"{getattr(kw.get('sim'), 'name', '?')} fell ill ({kw.get('status', '?')}).",
+                    Visibility.HOUSEHOLD,
+                    -0.5,
+                    0.6,
+                    12,
+                    extra={
+                        "severity": getattr(kw.get("sim"), "illness_severity", "mild")
+                    },
+                )
+                if kw.get("status") == "sick"
+                else None
+            ),
+        )
         # Gig completed
-        self._bus.on("gig_completed", lambda **kw: (
-            _make_and_process(
-                EventType.GIG_SUCCESS, kw.get("sim"), [],
-                f"{getattr(kw.get('sim'),'name','?')} completed '{kw.get('label','a gig')}' (§{kw.get('pay',0):.0f}).",
-                Visibility.HOUSEHOLD, +0.6, 0.5, 10,
-            ) if kw.get("success") else None
-        ))
+        self._bus.on(
+            "gig_completed",
+            lambda **kw: (
+                _make_and_process(
+                    EventType.GIG_SUCCESS,
+                    kw.get("sim"),
+                    [],
+                    f"{getattr(kw.get('sim'), 'name', '?')} completed '{kw.get('label', 'a gig')}' (§{kw.get('pay', 0):.0f}).",
+                    Visibility.HOUSEHOLD,
+                    +0.6,
+                    0.5,
+                    10,
+                )
+                if kw.get("success")
+                else None
+            ),
+        )
         # Property purchased
-        self._bus.on("property_purchased", lambda **kw: _make_and_process(
-            EventType.PROPERTY_BOUGHT, kw.get("sim"), [],
-            f"{getattr(kw.get('sim'),'name','?')} bought {kw.get('property_name','a property')}.",
-            Visibility.CLUB, +0.7, 0.6, 15,
-        ))
+        self._bus.on(
+            "property_purchased",
+            lambda **kw: _make_and_process(
+                EventType.PROPERTY_BOUGHT,
+                kw.get("sim"),
+                [],
+                f"{getattr(kw.get('sim'), 'name', '?')} bought {kw.get('property_name', 'a property')}.",
+                Visibility.CLUB,
+                +0.7,
+                0.6,
+                15,
+            ),
+        )
         # Wish fulfilled
-        self._bus.on("wish_fulfilled", lambda **kw: _make_and_process(
-            EventType.WISH_FULFILLED, kw.get("sim"), [],
-            f"{getattr(kw.get('sim'),'name','?')} fulfilled their lifetime wish!",
-            Visibility.PUBLIC, +1.0, 1.0, 40,
-        ))
+        self._bus.on(
+            "wish_fulfilled",
+            lambda **kw: _make_and_process(
+                EventType.WISH_FULFILLED,
+                kw.get("sim"),
+                [],
+                f"{getattr(kw.get('sim'), 'name', '?')} fulfilled their lifetime wish!",
+                Visibility.PUBLIC,
+                +1.0,
+                1.0,
+                40,
+            ),
+        )
         # Milestone achieved
-        self._bus.on("milestone_achieved", lambda **kw: _make_and_process(
-            EventType.MILESTONE, kw.get("sim"), [],
-            f"{getattr(kw.get('sim'),'name','?')} reached milestone: {kw.get('milestone','?')}.",
-            Visibility.CLUB, +0.6, 0.5, 15,
-        ))
+        self._bus.on(
+            "milestone_achieved",
+            lambda **kw: _make_and_process(
+                EventType.MILESTONE,
+                kw.get("sim"),
+                [],
+                f"{getattr(kw.get('sim'), 'name', '?')} reached milestone: {kw.get('milestone', '?')}.",
+                Visibility.CLUB,
+                +0.6,
+                0.5,
+                15,
+            ),
+        )
         # Holiday
-        self._bus.on("holiday", lambda **kw: None)  # holidays handled by CalendarSystem already
+        self._bus.on(
+            "holiday", lambda **kw: None
+        )  # holidays handled by CalendarSystem already
+
+    def enqueue_player_action(
+        self, sim_id: str, action: str, target_sim_id: str | None = None
+    ) -> bool:
+        sim = self._sim_lookup.get(sim_id)
+        if not sim:
+            return False
+        sim.player_action_queue.append(
+            {"action": action, "target_sim_id": target_sim_id}
+        )
+        sim.control_mode = "queued"
+        return True
+
+    def interrupt_sim(self, sim_id: str, reason: str = "manual") -> bool:
+        sim = self._sim_lookup.get(sim_id)
+        if not sim:
+            return False
+        sim.current_directive = None
+        sim.player_action_queue.clear()
+        sim.control_mode = "interrupted"
+        sim.emotion.add("annoyance", 0.2, duration=2, source=f"interrupt:{reason}")
+        return True
+
+    def _process_control_directives(self) -> None:
+        if self._pending:
+            return
+        for sim in self.sims:
+            if str(getattr(sim, "control_mode", "autonomous")) not in (
+                "queued",
+                "player_directed",
+            ):
+                continue
+            queue = getattr(sim, "player_action_queue", [])
+            if not queue:
+                if str(getattr(sim, "control_mode", "autonomous")) == "queued":
+                    sim.control_mode = "autonomous"
+                continue
+            directive = queue.pop(0)
+            target_id = directive.get("target_sim_id")
+            action = str(directive.get("action", "chat"))
+            target = self._sim_lookup.get(target_id) if target_id else None
+            if target is None:
+                others = [o for o in self.sims if o.sim_id != sim.sim_id]
+                if not others:
+                    continue
+                target = random.choice(others)
+            sim.current_directive = directive
+            sim.control_mode = "player_directed"
+            self._submit_interaction(sim, target, action, self._venue)
+            if not queue:
+                sim.control_mode = "autonomous"
+            break
+
+    def buy_item(self, sim_id: str, lot_id: str, object_id: int, qty: int = 1) -> dict:
+        sim = self._sim_lookup.get(sim_id)
+        if sim is None:
+            return {"ok": False, "reason": "sim_not_found"}
+        ok = self.objects.buy_object(sim, lot_id, int(object_id), int(qty))
+        if not ok:
+            return {"ok": False, "reason": "buy_failed"}
+        self._bus.emit(
+            "object_bought",
+            sim=sim,
+            lot_id=lot_id,
+            object_id=int(object_id),
+            qty=int(qty),
+            tick=self._tick_count,
+        )
+        return {
+            "ok": True,
+            "sim_id": sim_id,
+            "lot_id": lot_id,
+            "object_id": int(object_id),
+            "qty": int(qty),
+            "simoleons": round(sim.simoleons, 2),
+            "inventory_weight": self.objects.inventory_weight(sim),
+        }
+
+    def sell_item(self, sim_id: str, object_id: int, qty: int = 1) -> dict:
+        sim = self._sim_lookup.get(sim_id)
+        if sim is None:
+            return {"ok": False, "reason": "sim_not_found"}
+        ok = self.objects.sell_object(sim, int(object_id), int(qty))
+        if not ok:
+            return {"ok": False, "reason": "sell_failed"}
+        self._bus.emit(
+            "object_sold",
+            sim=sim,
+            object_id=int(object_id),
+            qty=int(qty),
+            tick=self._tick_count,
+        )
+        return {
+            "ok": True,
+            "sim_id": sim_id,
+            "object_id": int(object_id),
+            "qty": int(qty),
+            "simoleons": round(sim.simoleons, 2),
+            "inventory_weight": self.objects.inventory_weight(sim),
+        }
 
     def _assign_coworkers(self) -> None:
         """Group sims by job category and assign them as each other's coworkers."""
@@ -2113,6 +2772,23 @@ class SimEngine:
             parent_b=parent_b,
             tick=self._tick_count,
         )
+        self.ancestry.register_birth(
+            child.sim_id,
+            [parent_a.sim_id, parent_b.sim_id],
+            inherited={
+                "traits": list(child.profile.get("traits", [])),
+                "genes": dict(child.profile.get("genes", {})),
+            },
+        )
+        if self.milestones.grant(
+            child.sim_id,
+            "birth",
+            self._tick_count,
+            source="spawn_child",
+            meta={"parents": [parent_a.sim_id, parent_b.sim_id]},
+        ):
+            child.milestones.append({"id": "birth", "tick": self._tick_count})
+        self.life_states.register_hybrid_offspring(child, parent_a, parent_b)
         return child
 
     def _run_life_event(
@@ -2416,6 +3092,7 @@ class SimEngine:
                     age=new_age,
                     tick=self._tick_count,
                 )
+                self._assign_age_and_formative_traits(sim, new_stage)
 
             # Birthday log
             logger.info("[AGE] %s is now %d (%s)", sim.name, new_age, new_stage)
@@ -2486,6 +3163,15 @@ class SimEngine:
                 ghost = SimClass(ghost_profile)
                 ghost.is_ghost = True
                 ghost.occult_type = "ghost"
+                death_tag = random.choice(
+                    [
+                        "fire_affinity",
+                        "cold_affinity",
+                        "electric_aura",
+                        "haunting_presence",
+                    ]
+                )
+                ghost.add_trait(death_tag, source="death")
                 ghost.household_id = dead_sim.household_id
                 ghost.simoleons = 0.0
                 self.sims.append(ghost)
@@ -2517,6 +3203,18 @@ class SimEngine:
                 best_score = rec.friendship
                 best_id = other.sim_id
         return best_id
+
+    def _assign_age_and_formative_traits(self, sim: "Sim", stage: str) -> None:
+        from config import AGE_TRAIT_CANDIDATES
+
+        options = AGE_TRAIT_CANDIDATES.get(stage.lower(), [])
+        if options and random.random() < 0.55:
+            sim.add_trait(random.choice(options), source="formative")
+        if stage.lower() in ("child", "teen") and random.random() < 0.35:
+            sim.add_trait(
+                random.choice(["explorer_past", "caregiver_past", "rebellious_past"]),
+                source="formative",
+            )
 
     def _maybe_run_npc_encounter(self, sim: Sim) -> None:
         """Gap 6 + System 8: Ambient NPC encounter with bg-LLM-generated dialogue."""
@@ -2757,6 +3455,8 @@ class SimEngine:
                     sim_b.illness_ticks_left = random.randint(2, 5)
 
     def _process_temperature_risk(self, hour: int) -> None:
+        from world.temperature_model import update_internal_temp, zone_from_temp
+
         month = 1 + (self._tick_count // 200) % 12
         is_winter = month in (12, 1, 2)
         is_summer = month in (6, 7, 8)
@@ -2769,12 +3469,26 @@ class SimEngine:
                 risk_delta += 0.22
             if sim.household_id:
                 risk_delta -= 0.12
+            outdoor_temp = float(getattr(self.weather.current, "temperature", 20.0))
+            update_internal_temp(
+                sim, outdoor_temp=outdoor_temp, indoor=bool(sim.household_id)
+            )
+            zone = zone_from_temp(sim.internal_temperature)
+            sim.thermal_state = zone
+            if zone in ("very_cold", "very_hot"):
+                risk_delta += 0.18
             sim.temperature_risk = max(
                 0.0, min(1.0, sim.temperature_risk + risk_delta - 0.06)
             )
             if sim.temperature_risk > 0.7:
                 sim.needs.energy = max(0, sim.needs.energy - 2.0)
                 sim.emotion.add("discomfort", 0.5, duration=2, source="temperature")
+            if sim.internal_temperature <= sim.min_temp_limit:
+                sim.health_status = "critical"
+                sim.emotion.add("fear", 0.8, duration=3, source="freezing")
+            if sim.internal_temperature >= sim.max_temp_limit:
+                sim.health_status = "critical"
+                sim.emotion.add("discomfort", 0.8, duration=3, source="heat_collapse")
 
     def _run_gig_economy(self) -> None:
         # Replaced by self.gigs (GigManager) — ticked in run_tick directly.
@@ -3472,4 +4186,8 @@ class SimEngine:
         )
 
     def _on_tick_complete(self, **_: Any) -> None:
-        pass
+        try:
+            if self._tick_count % 10 == 0:
+                self.adaptive_policy.save()
+        except Exception:
+            pass

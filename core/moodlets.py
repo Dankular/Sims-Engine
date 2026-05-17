@@ -40,31 +40,211 @@ class Moodlet:
 # ── Pre-defined moodlet library ───────────────────────────────────────────────
 
 MOODLET_DEFS: dict[str, dict] = {
-    # Positive
-    "well_rested":         {"emotion": "relief",      "intensity": 0.6, "valence": +0.5, "duration": 6},
-    "inspired":            {"emotion": "optimism",    "intensity": 0.7, "valence": +0.6, "duration": 8},
-    "flirty":              {"emotion": "desire",      "intensity": 0.6, "valence": +0.4, "duration": 5},
-    "on_a_roll":           {"emotion": "excitement",  "intensity": 0.7, "valence": +0.5, "duration": 6},
-    "just_had_fun":        {"emotion": "joy",         "intensity": 0.5, "valence": +0.4, "duration": 4},
-    "deeply_connected":    {"emotion": "love",        "intensity": 0.8, "valence": +0.7, "duration": 8},
-    "proud":               {"emotion": "pride",       "intensity": 0.6, "valence": +0.5, "duration": 5},
-    "grateful":            {"emotion": "gratitude",   "intensity": 0.6, "valence": +0.5, "duration": 4},
-    "energised":           {"emotion": "excitement",  "intensity": 0.5, "valence": +0.4, "duration": 5},
-    "sunshine_mood":       {"emotion": "optimism",    "intensity": 0.4, "valence": +0.3, "duration": 4},
-    "full_and_happy":      {"emotion": "joy",         "intensity": 0.4, "valence": +0.3, "duration": 3},
-    "gig_rush":            {"emotion": "excitement",  "intensity": 0.7, "valence": +0.5, "duration": 6},
-    "newly_wed":           {"emotion": "love",        "intensity": 1.0, "valence": +0.9, "duration": 20},
-    # Negative
-    "uncomfortable":       {"emotion": "discomfort",  "intensity": 0.5, "valence": -0.4, "duration": 4},
-    "stressed":            {"emotion": "nervousness", "intensity": 0.6, "valence": -0.5, "duration": 6},
-    "embarrassed":         {"emotion": "embarrassment","intensity":0.6, "valence": -0.4, "duration": 4},
-    "heartbroken":         {"emotion": "grief",       "intensity": 0.9, "valence": -0.8, "duration": 15},
-    "fighting_illness":    {"emotion": "discomfort",  "intensity": 0.7, "valence": -0.6, "duration": 8},
-    "too_cold":            {"emotion": "discomfort",  "intensity": 0.5, "valence": -0.4, "duration": 3},
-    "rainy_day_blues":     {"emotion": "sadness",     "intensity": 0.3, "valence": -0.2, "duration": 3},
-    "betrayed":            {"emotion": "grief",       "intensity": 0.8, "valence": -0.7, "duration": 10},
-    "drama_witnessed":     {"emotion": "surprise",    "intensity": 0.4, "valence": -0.2, "duration": 3},
-    "broke":               {"emotion": "nervousness", "intensity": 0.6, "valence": -0.5, "duration": 5},
+    # ── Happy / Content ──────────────────────────────────────────────────────────
+    "well_rested":           {"emotion": "relief",        "intensity": 0.6, "valence": +0.5, "duration": 6},
+    "power_nap":             {"emotion": "relief",        "intensity": 0.4, "valence": +0.3, "duration": 3},
+    "freshly_groomed":       {"emotion": "joy",           "intensity": 0.4, "valence": +0.3, "duration": 4},
+    "full_and_happy":        {"emotion": "joy",           "intensity": 0.4, "valence": +0.3, "duration": 3},
+    "delicious_meal":        {"emotion": "joy",           "intensity": 0.5, "valence": +0.4, "duration": 4},
+    "sunshine_mood":         {"emotion": "optimism",      "intensity": 0.4, "valence": +0.3, "duration": 4},
+    "home_sweet_home":       {"emotion": "relief",        "intensity": 0.5, "valence": +0.4, "duration": 5},
+    "cozy_fire":             {"emotion": "relief",        "intensity": 0.5, "valence": +0.4, "duration": 4},
+    "beautiful_environment": {"emotion": "admiration",    "intensity": 0.4, "valence": +0.3, "duration": 4},
+    "great_view":            {"emotion": "admiration",    "intensity": 0.4, "valence": +0.3, "duration": 3},
+    "vacation_mode":         {"emotion": "relief",        "intensity": 0.6, "valence": +0.5, "duration": 6},
+    "good_vibes":            {"emotion": "optimism",      "intensity": 0.4, "valence": +0.3, "duration": 4},
+    "coffee_boost":          {"emotion": "excitement",    "intensity": 0.5, "valence": +0.3, "duration": 3},
+    "music_lover":           {"emotion": "joy",           "intensity": 0.5, "valence": +0.4, "duration": 4},
+    "just_had_fun":          {"emotion": "joy",           "intensity": 0.5, "valence": +0.4, "duration": 4},
+    "power_study":           {"emotion": "optimism",      "intensity": 0.5, "valence": +0.4, "duration": 5},
+
+    # ── Social / Love ────────────────────────────────────────────────────────────
+    "deeply_connected":      {"emotion": "love",          "intensity": 0.8, "valence": +0.7, "duration": 8},
+    "newly_wed":             {"emotion": "love",          "intensity": 1.0, "valence": +0.9, "duration": 20},
+    "new_friend":            {"emotion": "joy",           "intensity": 0.5, "valence": +0.4, "duration": 5},
+    "social_butterfly":      {"emotion": "joy",           "intensity": 0.5, "valence": +0.4, "duration": 5},
+    "beloved":               {"emotion": "love",          "intensity": 0.7, "valence": +0.6, "duration": 8},
+    "new_baby":              {"emotion": "love",          "intensity": 0.9, "valence": +0.8, "duration": 15},
+
+    # ── Flirty / Romance ─────────────────────────────────────────────────────────
+    "flirty":                {"emotion": "desire",        "intensity": 0.6, "valence": +0.4, "duration": 5},
+    "alluring":              {"emotion": "desire",        "intensity": 0.7, "valence": +0.5, "duration": 5},
+    "enchanted":             {"emotion": "love",          "intensity": 0.7, "valence": +0.6, "duration": 6},
+    "head_over_heels":       {"emotion": "love",          "intensity": 0.9, "valence": +0.8, "duration": 10},
+    "in_the_mood":           {"emotion": "desire",        "intensity": 0.6, "valence": +0.4, "duration": 4},
+    "love_is_in_the_air":    {"emotion": "desire",        "intensity": 0.5, "valence": +0.4, "duration": 5},
+
+    # ── Inspired / Creative ──────────────────────────────────────────────────────
+    "inspired":              {"emotion": "optimism",      "intensity": 0.7, "valence": +0.6, "duration": 8},
+    "creative_energy":       {"emotion": "excitement",    "intensity": 0.6, "valence": +0.5, "duration": 6},
+    "in_a_creative_flow":    {"emotion": "excitement",    "intensity": 0.8, "valence": +0.6, "duration": 7},
+    "muse_visited":          {"emotion": "optimism",      "intensity": 0.7, "valence": +0.6, "duration": 8},
+    "feeling_artistic":      {"emotion": "optimism",      "intensity": 0.5, "valence": +0.4, "duration": 5},
+    "deep_in_thought":       {"emotion": "curiosity",     "intensity": 0.5, "valence": +0.3, "duration": 5},
+
+    # ── Confident / Proud ────────────────────────────────────────────────────────
+    "proud":                 {"emotion": "pride",         "intensity": 0.6, "valence": +0.5, "duration": 5},
+    "feeling_confident":     {"emotion": "pride",         "intensity": 0.6, "valence": +0.5, "duration": 6},
+    "got_what_it_takes":     {"emotion": "pride",         "intensity": 0.6, "valence": +0.5, "duration": 5},
+    "hard_at_work":          {"emotion": "optimism",      "intensity": 0.4, "valence": +0.3, "duration": 4},
+    "skill_mastered":        {"emotion": "pride",         "intensity": 0.8, "valence": +0.7, "duration": 8},
+    "just_promoted":         {"emotion": "pride",         "intensity": 0.8, "valence": +0.7, "duration": 8},
+    "dream_job":             {"emotion": "joy",           "intensity": 0.7, "valence": +0.6, "duration": 8},
+    "big_win":               {"emotion": "joy",           "intensity": 0.7, "valence": +0.6, "duration": 6},
+    "celebrity_status":      {"emotion": "pride",         "intensity": 0.7, "valence": +0.6, "duration": 8},
+    "grateful":              {"emotion": "gratitude",     "intensity": 0.6, "valence": +0.5, "duration": 4},
+    "new_home":              {"emotion": "joy",           "intensity": 0.7, "valence": +0.6, "duration": 8},
+    "property_owner":        {"emotion": "pride",         "intensity": 0.6, "valence": +0.5, "duration": 6},
+    "wealthy":               {"emotion": "joy",           "intensity": 0.6, "valence": +0.5, "duration": 6},
+    "fanatic":               {"emotion": "admiration",    "intensity": 0.6, "valence": +0.4, "duration": 5},
+
+    # ── Energized ────────────────────────────────────────────────────────────────
+    "energised":             {"emotion": "excitement",    "intensity": 0.5, "valence": +0.4, "duration": 5},
+    "on_a_roll":             {"emotion": "excitement",    "intensity": 0.7, "valence": +0.5, "duration": 6},
+    "runners_high":          {"emotion": "excitement",    "intensity": 0.7, "valence": +0.5, "duration": 5},
+    "pumped_up":             {"emotion": "excitement",    "intensity": 0.6, "valence": +0.5, "duration": 5},
+    "gig_rush":              {"emotion": "excitement",    "intensity": 0.7, "valence": +0.5, "duration": 6},
+
+    # ── Playful / Focused ────────────────────────────────────────────────────────
+    "feeling_playful":       {"emotion": "amusement",     "intensity": 0.5, "valence": +0.4, "duration": 5},
+    "having_a_blast":        {"emotion": "joy",           "intensity": 0.7, "valence": +0.6, "duration": 5},
+    "being_silly":           {"emotion": "amusement",     "intensity": 0.5, "valence": +0.4, "duration": 4},
+    "mathematically_minded": {"emotion": "optimism",      "intensity": 0.5, "valence": +0.3, "duration": 5},
+    "in_the_zone":           {"emotion": "optimism",      "intensity": 0.6, "valence": +0.4, "duration": 6},
+
+    # ── Embarrassed ──────────────────────────────────────────────────────────────
+    "embarrassed":           {"emotion": "embarrassment", "intensity": 0.6, "valence": -0.4, "duration": 4},
+    "really_embarrassed":    {"emotion": "embarrassment", "intensity": 0.7, "valence": -0.5, "duration": 5},
+    "mortified":             {"emotion": "embarrassment", "intensity": 0.9, "valence": -0.7, "duration": 7},
+    "walked_in_on":          {"emotion": "embarrassment", "intensity": 0.8, "valence": -0.6, "duration": 5},
+    "exposed":               {"emotion": "embarrassment", "intensity": 0.7, "valence": -0.6, "duration": 5},
+    "bladder_failure":       {"emotion": "embarrassment", "intensity": 0.9, "valence": -0.7, "duration": 6},
+    "public_meltdown":       {"emotion": "embarrassment", "intensity": 0.8, "valence": -0.6, "duration": 6},
+
+    # ── Angry ────────────────────────────────────────────────────────────────────
+    "irritated":             {"emotion": "annoyance",     "intensity": 0.4, "valence": -0.3, "duration": 3},
+    "stressed":              {"emotion": "nervousness",   "intensity": 0.6, "valence": -0.5, "duration": 6},
+    "fuming":                {"emotion": "anger",         "intensity": 0.7, "valence": -0.6, "duration": 5},
+    "seething":              {"emotion": "anger",         "intensity": 0.8, "valence": -0.7, "duration": 6},
+    "furious":               {"emotion": "anger",         "intensity": 0.9, "valence": -0.8, "duration": 7},
+    "enraged":               {"emotion": "anger",         "intensity": 1.0, "valence": -0.9, "duration": 8},
+    "publicly_humiliated":   {"emotion": "anger",         "intensity": 0.8, "valence": -0.7, "duration": 8},
+    "wrongfully_accused":    {"emotion": "anger",         "intensity": 0.7, "valence": -0.6, "duration": 6},
+    "jealous":               {"emotion": "annoyance",     "intensity": 0.6, "valence": -0.5, "duration": 5},
+
+    # ── Sad ──────────────────────────────────────────────────────────────────────
+    "heartbroken":           {"emotion": "grief",         "intensity": 0.9, "valence": -0.8, "duration": 15},
+    "betrayed":              {"emotion": "grief",         "intensity": 0.8, "valence": -0.7, "duration": 10},
+    "cheated_on":            {"emotion": "grief",         "intensity": 1.0, "valence": -0.9, "duration": 15},
+    "mourning":              {"emotion": "grief",         "intensity": 0.9, "valence": -0.8, "duration": 20},
+    "grief_stricken":        {"emotion": "grief",         "intensity": 1.0, "valence": -1.0, "duration": 25},
+    "very_sad":              {"emotion": "sadness",       "intensity": 0.7, "valence": -0.6, "duration": 8},
+    "rainy_day_blues":       {"emotion": "sadness",       "intensity": 0.3, "valence": -0.2, "duration": 3},
+    "crushed_dreams":        {"emotion": "sadness",       "intensity": 0.8, "valence": -0.7, "duration": 10},
+    "lonely":                {"emotion": "sadness",       "intensity": 0.6, "valence": -0.5, "duration": 6},
+    "in_a_slump":            {"emotion": "sadness",       "intensity": 0.5, "valence": -0.4, "duration": 6},
+    "stir_crazy":            {"emotion": "nervousness",   "intensity": 0.5, "valence": -0.4, "duration": 5},
+    "social_isolation":      {"emotion": "sadness",       "intensity": 0.7, "valence": -0.6, "duration": 8},
+    "homesick":              {"emotion": "sadness",       "intensity": 0.5, "valence": -0.4, "duration": 6},
+    "feeling_replaced":      {"emotion": "sadness",       "intensity": 0.6, "valence": -0.5, "duration": 6},
+    "depressed":             {"emotion": "sadness",       "intensity": 0.8, "valence": -0.7, "duration": 10},
+    "guilty":                {"emotion": "remorse",       "intensity": 0.6, "valence": -0.5, "duration": 6},
+    "regretful":             {"emotion": "remorse",       "intensity": 0.7, "valence": -0.6, "duration": 7},
+
+    # ── Uncomfortable / Physical ─────────────────────────────────────────────────
+    "uncomfortable":         {"emotion": "discomfort",    "intensity": 0.5, "valence": -0.4, "duration": 4},
+    "hungry_pangs":          {"emotion": "discomfort",    "intensity": 0.6, "valence": -0.5, "duration": 3},
+    "exhausted":             {"emotion": "discomfort",    "intensity": 0.7, "valence": -0.6, "duration": 5},
+    "stinky":                {"emotion": "disgust",       "intensity": 0.5, "valence": -0.4, "duration": 4},
+    "dirty_surroundings":    {"emotion": "disgust",       "intensity": 0.4, "valence": -0.3, "duration": 3},
+    "something_stinks":      {"emotion": "disgust",       "intensity": 0.4, "valence": -0.3, "duration": 3},
+    "cramped":               {"emotion": "discomfort",    "intensity": 0.4, "valence": -0.3, "duration": 4},
+    "queasy":                {"emotion": "disgust",       "intensity": 0.6, "valence": -0.5, "duration": 5},
+    "overstimulated":        {"emotion": "nervousness",   "intensity": 0.5, "valence": -0.4, "duration": 4},
+    "fighting_illness":      {"emotion": "discomfort",    "intensity": 0.7, "valence": -0.6, "duration": 8},
+    "too_cold":              {"emotion": "discomfort",    "intensity": 0.5, "valence": -0.4, "duration": 3},
+    "too_hot":               {"emotion": "discomfort",    "intensity": 0.5, "valence": -0.4, "duration": 3},
+    "tense":                 {"emotion": "nervousness",   "intensity": 0.5, "valence": -0.4, "duration": 5},
+    "overwhelmed":           {"emotion": "nervousness",   "intensity": 0.7, "valence": -0.6, "duration": 6},
+    "fighting_burnout":      {"emotion": "nervousness",   "intensity": 0.7, "valence": -0.6, "duration": 8},
+    "broke":                 {"emotion": "nervousness",   "intensity": 0.6, "valence": -0.5, "duration": 5},
+
+    # ── Scared ───────────────────────────────────────────────────────────────────
+    "spooked":               {"emotion": "fear",          "intensity": 0.5, "valence": -0.4, "duration": 4},
+    "freaked_out":           {"emotion": "fear",          "intensity": 0.7, "valence": -0.6, "duration": 5},
+    "terrified":             {"emotion": "fear",          "intensity": 0.9, "valence": -0.8, "duration": 6},
+    "nightmare":             {"emotion": "fear",          "intensity": 0.8, "valence": -0.7, "duration": 5},
+    "anxiety":               {"emotion": "nervousness",   "intensity": 0.7, "valence": -0.6, "duration": 7},
+    "peer_pressure":         {"emotion": "nervousness",   "intensity": 0.5, "valence": -0.4, "duration": 5},
+    "out_of_my_depth":       {"emotion": "nervousness",   "intensity": 0.6, "valence": -0.5, "duration": 5},
+
+    # ── Misc Negative ────────────────────────────────────────────────────────────
+    "drama_witnessed":       {"emotion": "surprise",      "intensity": 0.4, "valence": -0.2, "duration": 3},
+    "bored":                 {"emotion": "discomfort",    "intensity": 0.3, "valence": -0.3, "duration": 4},
+    "dazed":                 {"emotion": "confusion",     "intensity": 0.4, "valence": -0.2, "duration": 3},
+    "confused":              {"emotion": "confusion",     "intensity": 0.4, "valence": -0.2, "duration": 3},
+    "toxic_environment":     {"emotion": "disgust",       "intensity": 0.6, "valence": -0.5, "duration": 6},
+    "stormy_day":            {"emotion": "nervousness",   "intensity": 0.4, "valence": -0.3, "duration": 3},
+    "toxic_relationship":    {"emotion": "disgust",       "intensity": 0.7, "valence": -0.6, "duration": 8},
+}
+
+
+# ── TS4-style emotion derivation ──────────────────────────────────────────────
+
+_EMOTION_TO_TS4: dict[str, str] = {
+    "joy":            "Happy",
+    "relief":         "Happy",
+    "optimism":       "Happy",
+    "gratitude":      "Happy",
+    "approval":       "Happy",
+    "caring":         "Happy",
+    "admiration":     "Happy",
+    "desire":         "Flirty",
+    "love":           "Flirty",
+    "excitement":     "Energized",
+    "pride":          "Confident",
+    "curiosity":      "Focused",
+    "amusement":      "Playful",
+    "anger":          "Angry",
+    "annoyance":      "Angry",
+    "grief":          "Sad",
+    "sadness":        "Sad",
+    "remorse":        "Sad",
+    "disappointment": "Sad",
+    "disapproval":    "Sad",
+    "embarrassment":  "Embarrassed",
+    "discomfort":     "Uncomfortable",
+    "disgust":        "Uncomfortable",
+    "nervousness":    "Tense",
+    "fear":           "Scared",
+    "confusion":      "Dazed",
+    "surprise":       "Dazed",
+}
+
+TS4_EMOTION_COLORS: dict[str, str] = {
+    "Happy":        "#28b552",
+    "Angry":        "#c3192b",
+    "Sad":          "#2c44aa",
+    "Flirty":       "#ee5da5",
+    "Inspired":     "#33bcc1",
+    "Confident":    "#448cc8",
+    "Playful":      "#b646ad",
+    "Energized":    "#9dc948",
+    "Focused":      "#7038ec",
+    "Embarrassed":  "#e1c043",
+    "Uncomfortable":"#e26246",
+    "Tense":        "#df841c",
+    "Dazed":        "#816dcc",
+    "Bored":        "#818785",
+    "Scared":       "#7e1260",
+    "Fine":         "#e9e9e9",
+}
+
+# Moodlet keys that can trigger deadly emotional states (TS4 mechanic)
+DEADLY_MOODLETS: dict[str, str] = {
+    "enraged":        "Enraged",      # cardiac explosion risk
+    "mortified":      "Mortified",    # death by embarrassment
+    "grief_stricken": "Overwhelmed",  # sustained grief collapse
 }
 
 
@@ -125,3 +305,32 @@ class MoodletStack:
 
     def has(self, key: str) -> bool:
         return any(m.label == key for m in self._moodlets)
+
+    def ts4_emotion(self) -> str:
+        """Derive TS4-style emotion from moodlet stack."""
+        if not self._moodlets:
+            return "Fine"
+        scores: dict[str, float] = {}
+        for m in self._moodlets:
+            ts4 = _EMOTION_TO_TS4.get(m.emotion, "Fine")
+            scores[ts4] = scores.get(ts4, 0.0) + m.intensity
+        return max(scores, key=lambda k: scores[k])
+
+    def ts4_intensity(self) -> int:
+        """Stage 1 = mild, 2 = strong, 3 = deadly."""
+        dom = self.dominant()
+        if dom is None:
+            return 0
+        if dom.label in DEADLY_MOODLETS:
+            return 3
+        return 2 if dom.intensity >= 0.75 else 1
+
+    def ts4_color(self) -> str:
+        return TS4_EMOTION_COLORS.get(self.ts4_emotion(), "#e9e9e9")
+
+    def deadly_emotion(self) -> str | None:
+        """Returns deadly emotion name if at risk, else None."""
+        for m in self._moodlets:
+            if m.label in DEADLY_MOODLETS:
+                return DEADLY_MOODLETS[m.label]
+        return None

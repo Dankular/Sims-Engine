@@ -10,6 +10,7 @@ Trigger mapping:  _apply_resolved detects patterns in (interaction, valence,
 Decay:            engine run_tick calls decay_sentiments(rel, tick) every tick.
 Gating:           choose_interaction checks blocked_by / unlocked_by.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -21,47 +22,63 @@ if TYPE_CHECKING:
 
 # ── Sentiment catalogue ───────────────────────────────────────────────────────
 
+
 @dataclass
 class SentimentDef:
-    valence: float          # emotional charge: -1.0..+1.0
-    decay_ticks: int        # how many ticks until the sentiment fades (−1 = permanent)
-    blocks: list[str] = field(default_factory=list)    # interaction types blocked
-    unlocks: list[str] = field(default_factory=list)   # interaction types unlocked
+    valence: float  # emotional charge: -1.0..+1.0
+    decay_ticks: int  # how many ticks until the sentiment fades (−1 = permanent)
+    blocks: list[str] = field(default_factory=list)  # interaction types blocked
+    unlocks: list[str] = field(default_factory=list)  # interaction types unlocked
+
 
 SENTIMENT_CATALOGUE: dict[str, SentimentDef] = {
     # ── Positive ──────────────────────────────────────────────────────────────
-    "first_kiss":        SentimentDef(+1.0, 300,  unlocks=["kiss", "embrace", "hold hands"]),
-    "first_love":        SentimentDef(+1.0, 600,  unlocks=["express love", "propose marriage"]),
-    "saved_me":          SentimentDef(+0.9, 400,  unlocks=["deep emotional talk", "confide"]),
-    "shared_triumph":    SentimentDef(+0.8, 150,  unlocks=["celebrate together"]),
-    "inspired_me":       SentimentDef(+0.8, 250,  unlocks=["deep conversation", "mentor"]),
-    "reconciled":        SentimentDef(+0.7, 200,  unlocks=["confide", "hug"]),
-    "childhood_bond":    SentimentDef(+0.6, -1,   unlocks=["share memory", "confide"]),
-    "gratitude":         SentimentDef(+0.7, 100,  unlocks=["express gratitude"]),
+    "first_kiss": SentimentDef(+1.0, 300, unlocks=["kiss", "embrace", "hold hands"]),
+    "first_love": SentimentDef(+1.0, 600, unlocks=["express love", "propose marriage"]),
+    "saved_me": SentimentDef(+0.9, 400, unlocks=["deep emotional talk", "confide"]),
+    "shared_triumph": SentimentDef(+0.8, 150, unlocks=["celebrate together"]),
+    "inspired_me": SentimentDef(+0.8, 250, unlocks=["deep conversation", "mentor"]),
+    "reconciled": SentimentDef(+0.7, 200, unlocks=["confide", "hug"]),
+    "childhood_bond": SentimentDef(+0.6, -1, unlocks=["share memory", "confide"]),
+    "gratitude": SentimentDef(+0.7, 100, unlocks=["express gratitude"]),
     # ── Negative ──────────────────────────────────────────────────────────────
-    "betrayal":          SentimentDef(-1.0, 200,  blocks=["share secret", "confide", "express love"]),
-    "heartbreak":        SentimentDef(-0.9, 300,  blocks=["flirt", "hold hands", "kiss", "express love"]),
-    "held_grudge":       SentimentDef(-0.7, 150,  blocks=["flirt", "compliment"]),
-    "embarrassed_me":    SentimentDef(-0.6, 100,  blocks=["joke", "share story", "tell story"]),
-    "jealousy_drama":    SentimentDef(-0.5,  80,  blocks=["compliment appearance"]),
-    "rivalry_formed":    SentimentDef(-0.8, 250,  blocks=["deep conversation", "confide"],
-                                               unlocks=["rivalry_escalation", "confront"]),
-    "cheated_on_me":     SentimentDef(-1.0, -1,   blocks=["flirt", "kiss", "hold hands", "express love"]),
-    "lied_to_me":        SentimentDef(-0.8, 180,  blocks=["confide", "share secret"]),
+    "betrayal": SentimentDef(
+        -1.0, 200, blocks=["share secret", "confide", "express love"]
+    ),
+    "heartbreak": SentimentDef(
+        -0.9, 300, blocks=["flirt", "hold hands", "kiss", "express love"]
+    ),
+    "held_grudge": SentimentDef(-0.7, 150, blocks=["flirt", "compliment"]),
+    "embarrassed_me": SentimentDef(
+        -0.6, 100, blocks=["joke", "share story", "tell story"]
+    ),
+    "jealousy_drama": SentimentDef(-0.5, 80, blocks=["compliment appearance"]),
+    "rivalry_formed": SentimentDef(
+        -0.8,
+        250,
+        blocks=["deep conversation", "confide"],
+        unlocks=["rivalry_escalation", "confront"],
+    ),
+    "cheated_on_me": SentimentDef(
+        -1.0, -1, blocks=["flirt", "kiss", "hold hands", "express love"]
+    ),
+    "lied_to_me": SentimentDef(-0.8, 180, blocks=["confide", "share secret"]),
 }
 
 
 # ── SentimentRecord ───────────────────────────────────────────────────────────
 
+
 @dataclass
 class SentimentRecord:
-    name: str               # key into SENTIMENT_CATALOGUE
+    name: str  # key into SENTIMENT_CATALOGUE
     added_tick: int
-    expires_tick: int       # −1 = never expires
-    source: str = ""        # interaction string that triggered this
+    expires_tick: int  # −1 = never expires
+    source: str = ""  # interaction string that triggered this
 
 
 # ── Relationship helpers ──────────────────────────────────────────────────────
+
 
 def add_sentiment(
     rel: "RelationshipRecord",
@@ -87,8 +104,11 @@ def add_sentiment(
             return False
 
     expires = current_tick + defn.decay_ticks if defn.decay_ticks > 0 else -1
-    rel.sentiments.append(SentimentRecord(name=name, added_tick=current_tick,
-                                          expires_tick=expires, source=source))
+    rel.sentiments.append(
+        SentimentRecord(
+            name=name, added_tick=current_tick, expires_tick=expires, source=source
+        )
+    )
     return True
 
 
@@ -97,10 +117,16 @@ def decay_sentiments(rel: "RelationshipRecord", current_tick: int) -> list[str]:
     if not hasattr(rel, "sentiments"):
         rel.sentiments = []
         return []
-    expired = [s.name for s in rel.sentiments
-               if s.expires_tick != -1 and current_tick >= s.expires_tick]
-    rel.sentiments = [s for s in rel.sentiments
-                      if s.expires_tick == -1 or current_tick < s.expires_tick]
+    expired = [
+        s.name
+        for s in rel.sentiments
+        if s.expires_tick != -1 and current_tick >= s.expires_tick
+    ]
+    rel.sentiments = [
+        s
+        for s in rel.sentiments
+        if s.expires_tick == -1 or current_tick < s.expires_tick
+    ]
     return expired
 
 
@@ -139,6 +165,7 @@ def sentiment_valence_bonus(rel: "RelationshipRecord") -> float:
 
 # ── Trigger detection ─────────────────────────────────────────────────────────
 
+
 def detect_sentiment(
     interaction: str,
     valence: float,
@@ -146,6 +173,8 @@ def detect_sentiment(
     friendship: float,
     romance: float,
     current_tick: int,
+    sim_a=None,
+    sim_b=None,
 ) -> list[str]:
     """
     Inspect a resolved interaction and return a list of sentiment names to add.
@@ -154,16 +183,24 @@ def detect_sentiment(
     triggered: list[str] = []
     inter = interaction.lower()
     reaction = result.get("sim_b_reaction", "").lower()
-    mem_tag  = result.get("memory_tag", "").lower()
+    mem_tag = result.get("memory_tag", "").lower()
 
     # ── Positive triggers ──────────────────────────────────────────────────
     if "kiss" in inter and valence > 0.5 and romance >= 20:
         triggered.append("first_kiss")
 
-    if ("express love" in inter or "express_love" in inter) and valence > 0.6 and romance >= 55:
+    if (
+        ("express love" in inter or "express_love" in inter)
+        and valence > 0.6
+        and romance >= 55
+    ):
         triggered.append("first_love")
 
-    if ("comfort" in inter or "support" in inter) and valence > 0.7 and friendship >= 50:
+    if (
+        ("comfort" in inter or "support" in inter)
+        and valence > 0.7
+        and friendship >= 50
+    ):
         triggered.append("saved_me")
 
     if ("celebrate" in inter or "shared triumph" in mem_tag) and valence > 0.6:
@@ -185,7 +222,15 @@ def detect_sentiment(
     if ("break" in inter and "up" in inter) or ("heartbreak" in mem_tag):
         triggered.append("heartbreak")
 
-    if valence < -0.6 and friendship > 30:
+    grudge_threshold = -0.6
+    if sim_a is not None:
+        traits = set(getattr(sim_a, "profile", {}).get("traits", []))
+        if "hot-headed" in traits or "jealous" in traits:
+            grudge_threshold = -0.45
+        if "cheerful" in traits or "good" in traits:
+            grudge_threshold = -0.7
+
+    if valence < grudge_threshold and friendship > 30:
         triggered.append("held_grudge")
 
     if "embarrass" in inter or ("embarrass" in reaction and valence < -0.3):
