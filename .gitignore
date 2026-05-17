@@ -36,7 +36,6 @@ audio/*.mp3
 *.env
 
 # Private notes
-CLAUDE*.md
 plan.md
 
 # OS
