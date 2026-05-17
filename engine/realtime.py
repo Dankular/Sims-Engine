@@ -144,11 +144,21 @@ class RealtimeSimEngine:
                 logger.warning("Adjudicator failed: %s", exc)
 
     def _update_needs(self, elapsed_real: float) -> None:
-        """Rate-based need decay proportional to elapsed sim time."""
+        """Rate-based need decay + autonomous self-care."""
         sim_hours = elapsed_real * self.clock.speed / 3_600.0
+        from config import (
+            SLEEP_ENERGY_THRESHOLD, SLEEP_ENERGY_RESTORE, SLEEP_WAKE_THRESHOLD,
+            HUNGER_HOME_THRESHOLD, HUNGER_HOME_RESTORE,
+            BLADDER_FLUSH_THRESHOLD, BLADDER_RESTORE,
+            HYGIENE_SHOWER_THRESHOLD, HYGIENE_RESTORE,
+        )
+        restore_rate = sim_hours / _SIM_HOURS_PER_TICK  # fractional tick equivalent
+
         for sim in self._engine.sims:
             n = sim.needs
             extrav_mod = 1.2 if sim.ocean.get("extraversion", 0.5) > 0.6 else 0.7
+
+            # Decay
             n.hunger    = max(0.0, n.hunger    - sim_hours * _HUNGER_RATE)
             n.energy    = max(0.0, n.energy    - sim_hours * _ENERGY_RATE)
             n.social    = max(0.0, n.social    - sim_hours * _SOCIAL_RATE * extrav_mod)
@@ -158,7 +168,27 @@ class RealtimeSimEngine:
             n.comfort   = max(0.0, n.comfort   - sim_hours * _COMFORT_RATE)
             n.environment = max(0.0, n.environment - sim_hours * _ENV_RATE)
 
-            # Emit critical need emotions
+            # Autonomous self-care (proportional to elapsed time)
+            if n.energy < SLEEP_ENERGY_THRESHOLD:
+                if not getattr(sim, "_sleeping", False):
+                    sim._sleeping = True
+                    sim.emotion.add("relief", 0.3, duration=3, source="sleep")
+                n.energy = min(100.0, n.energy + SLEEP_ENERGY_RESTORE * restore_rate)
+            elif getattr(sim, "_sleeping", False):
+                if n.energy >= SLEEP_WAKE_THRESHOLD:
+                    sim._sleeping = False
+                    sim.emotion.add("optimism", 0.4, duration=4, source="well_rested")
+                else:
+                    n.energy = min(100.0, n.energy + SLEEP_ENERGY_RESTORE * restore_rate)
+
+            if n.hunger  < HUNGER_HOME_THRESHOLD:
+                n.hunger  = min(100.0, n.hunger  + HUNGER_HOME_RESTORE  * restore_rate)
+            if n.bladder < BLADDER_FLUSH_THRESHOLD:
+                n.bladder = min(100.0, n.bladder + BLADDER_RESTORE       * restore_rate)
+            if n.hygiene < HYGIENE_SHOWER_THRESHOLD:
+                n.hygiene = min(100.0, n.hygiene + HYGIENE_RESTORE       * restore_rate)
+
+            # Critical need emotions
             for need in n.critical_needs():
                 label = "annoyance" if need in ("bladder", "hunger") else "discomfort"
                 sim.emotion.add(label, 0.7, duration=2, source=f"critical:{need}")

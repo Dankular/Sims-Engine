@@ -114,12 +114,25 @@ ADJ_WORKERS = 3
 
 # ── Shops ────────────────────────────────────────────────────────────────────
 SHOP_DEFS = [
-    {"name": "restaurant", "need": "hunger", "cost": 30, "restore": 80},
-    {"name": "gym", "need": "fun", "cost": 20, "restore": 50},
-    {"name": "spa", "need": "comfort", "cost": 45, "restore": 60},
-    {"name": "convenience store", "need": "hunger", "cost": 12, "restore": 40},
+    {"name": "restaurant",        "need": "hunger",  "cost": 30, "restore": 80},
+    {"name": "gym",               "need": "fun",     "cost": 20, "restore": 50},
+    {"name": "spa",               "need": "comfort", "cost": 45, "restore": 60},
+    {"name": "convenience store", "need": "hunger",  "cost": 12, "restore": 40},
 ]
 LOW_NEED_SHOP_THRESHOLD = 25
+
+# ── Autonomous self-care (free, no simoleons required) ────────────────────────
+# Sleep — restores energy when critically low
+SLEEP_ENERGY_THRESHOLD = 25    # energy < this → sim starts sleeping
+SLEEP_ENERGY_RESTORE   =  8.0  # energy units restored per tick while sleeping
+SLEEP_WAKE_THRESHOLD   = 70    # energy > this → sim wakes up
+# Basic at-home needs (free fallback when shops unavailable/unaffordable)
+HUNGER_HOME_THRESHOLD  = 12    # hunger < this → eat something basic at home
+HUNGER_HOME_RESTORE    = 30.0
+BLADDER_FLUSH_THRESHOLD= 10    # bladder < this → use bathroom (always free)
+BLADDER_RESTORE        = 90.0
+HYGIENE_SHOWER_THRESHOLD=20    # hygiene < this → quick shower at home
+HYGIENE_RESTORE        = 55.0
 
 # ── Aging & life cycle ───────────────────────────────────────────────────────
 TICKS_PER_YEAR      = 50    # 1 in-game year = this many ticks

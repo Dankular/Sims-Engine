@@ -187,6 +187,41 @@ class SimEngine:
             except Exception:
                 pass
 
+        # Autonomous self-care — free, no simoleons needed, always available
+        from config import (
+            SLEEP_ENERGY_THRESHOLD, SLEEP_ENERGY_RESTORE, SLEEP_WAKE_THRESHOLD,
+            HUNGER_HOME_THRESHOLD, HUNGER_HOME_RESTORE,
+            BLADDER_FLUSH_THRESHOLD, BLADDER_RESTORE,
+            HYGIENE_SHOWER_THRESHOLD, HYGIENE_RESTORE,
+        )
+        for sim in self.sims:
+            n = sim.needs
+
+            # Sleep — start when energy critically low, continue until wake threshold
+            if n.energy < SLEEP_ENERGY_THRESHOLD:
+                if not getattr(sim, "_sleeping", False):
+                    sim._sleeping = True
+                    sim.emotion.add("relief", 0.3, duration=3, source="sleep")
+                n.energy = min(100.0, n.energy + SLEEP_ENERGY_RESTORE)
+            elif getattr(sim, "_sleeping", False):
+                if n.energy >= SLEEP_WAKE_THRESHOLD:
+                    sim._sleeping = False
+                    sim.emotion.add("optimism", 0.4, duration=4, source="well_rested")
+                else:
+                    n.energy = min(100.0, n.energy + SLEEP_ENERGY_RESTORE)  # keep sleeping
+
+            # Basic at-home eating
+            if n.hunger < HUNGER_HOME_THRESHOLD:
+                n.hunger = min(100.0, n.hunger + HUNGER_HOME_RESTORE)
+
+            # Bathroom
+            if n.bladder < BLADDER_FLUSH_THRESHOLD:
+                n.bladder = min(100.0, n.bladder + BLADDER_RESTORE)
+
+            # Quick shower
+            if n.hygiene < HYGIENE_SHOWER_THRESHOLD:
+                n.hygiene = min(100.0, n.hygiene + HYGIENE_RESTORE)
+
         # Shop visits for critically low needs
         from world.economy import visit_shop
         from config import SHOP_DEFS, LOW_NEED_SHOP_THRESHOLD
@@ -214,7 +249,9 @@ class SimEngine:
             )
 
         # Active LOD: queue one LLM interaction when the queue is empty
-        active = [s for s in self.sims if s.lod_tier == LODTier.ACTIVE]
+        # Exclude sleeping sims from interaction pool
+        active = [s for s in self.sims
+                  if s.lod_tier == LODTier.ACTIVE and not getattr(s, "_sleeping", False)]
         if len(active) >= 2 and not self._pending:
             pair = pick_interaction_pair(active, self.relationships)
             if pair:
