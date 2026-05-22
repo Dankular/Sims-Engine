@@ -54,11 +54,100 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
+import os
+import subprocess
 import sys
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+
+_server_logger = logging.getLogger(__name__)
+
+# Default model for auto-started llama-server
+_DEFAULT_LLAMA_MODEL = "unsloth/Qwen3.5-0.8B-MTP-GGUF:UD-Q4_K_XL"
+_DEFAULT_LLAMA_ALIAS = "qwen3.5-0.8b-mtp"
+
+
+def ensure_llama_server(
+    host: str = "127.0.0.1",
+    port: int = 8181,
+    model: str = _DEFAULT_LLAMA_MODEL,
+    alias: str = _DEFAULT_LLAMA_ALIAS,
+    wait_secs: int = 120,
+) -> str:
+    """
+    Ensure llama-server is running and return its chat completions URL.
+
+    Checks the /health endpoint; if unreachable, spawns llama-server as a
+    background process and waits up to wait_secs for it to become ready.
+    Sets SIM_V2_LLAMA_SERVER_URL so LlamaServerBackend picks it up.
+    """
+    import urllib.request
+    import urllib.error
+
+    health_url = f"http://{host}:{port}/health"
+    chat_url   = f"http://{host}:{port}/v1/chat/completions"
+
+    def _is_ready() -> bool:
+        try:
+            with urllib.request.urlopen(health_url, timeout=2) as r:
+                return r.status == 200
+        except Exception:
+            return False
+
+    if _is_ready():
+        _server_logger.info("[llama-server] Already running at %s", health_url)
+        os.environ["SIM_V2_LLAMA_SERVER_URL"] = chat_url
+        return chat_url
+
+    print(f"[llama-server] Not detected at {health_url} — starting …", flush=True)
+
+    args = [
+        "llama-server",
+        "-hf", model,
+        "--alias", alias,
+        "--host", host,
+        "--port", str(port),
+        "--ctx-size", "4096",
+        "--threads", "8",
+        "--spec-type", "draft-mtp",
+        "--spec-draft-n-max", "6",
+        "--reasoning", "off",
+        "--no-webui",
+        "-np", "1",
+        "--kv-cache-dtype", "fp8",
+    ]
+
+    try:
+        proc = subprocess.Popen(
+            args,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+        )
+    except FileNotFoundError:
+        print("[llama-server] WARNING: 'llama-server' not found on PATH — skipping auto-start.",
+              flush=True)
+        os.environ["SIM_V2_LLAMA_SERVER_URL"] = chat_url
+        return chat_url
+
+    print(f"[llama-server] Spawned (pid={proc.pid}). Waiting up to {wait_secs}s …", flush=True)
+    for elapsed in range(wait_secs):
+        if _is_ready():
+            print(f"[llama-server] Ready after {elapsed}s.", flush=True)
+            break
+        if proc.poll() is not None:
+            print(f"[llama-server] Process exited early (code={proc.returncode}) — continuing anyway.",
+                  flush=True)
+            break
+        time.sleep(1)
+    else:
+        print("[llama-server] Timed out waiting — continuing anyway.", flush=True)
+
+    os.environ["SIM_V2_LLAMA_SERVER_URL"] = chat_url
+    return chat_url
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -102,7 +191,8 @@ _online_ws_clients: list[WebSocket] = []
 _online_broadcast_loop = None
 _online_world_task: asyncio.Task | None = None
 _args: argparse.Namespace = argparse.Namespace(
-    sims=3, port=8080, host="0.0.0.0", backend="llama-server", no_datasets=False
+    sims=3, port=8080, host="0.0.0.0", backend="llama-server", no_datasets=False,
+    llama_port=8181, llama_model=_DEFAULT_LLAMA_MODEL,
 )
 
 
@@ -3182,8 +3272,6 @@ async def startup():
 
 
 if __name__ == "__main__":
-    import os as _os
-
     parser = argparse.ArgumentParser(description="Sims Engine API server")
     parser.add_argument("--sims", type=int, default=3)
     parser.add_argument("--port", type=int, default=8080)
@@ -3195,5 +3283,22 @@ if __name__ == "__main__":
     )
     parser.add_argument("--no-datasets", action="store_true")
     parser.add_argument("--no-restore", action="store_true")
+    # llama-server auto-start options
+    parser.add_argument(
+        "--llama-port", type=int, default=8181,
+        help="Port for llama-server (default 8181, avoids clash with sim server on 8080)",
+    )
+    parser.add_argument(
+        "--llama-model", type=str, default=_DEFAULT_LLAMA_MODEL,
+        help="HuggingFace model repo[:filename] to load if llama-server must be started",
+    )
     _args = parser.parse_args()
+
+    if _args.backend == "llama-server":
+        ensure_llama_server(
+            host="127.0.0.1",
+            port=_args.llama_port,
+            model=_args.llama_model,
+        )
+
     uvicorn.run(app, host=_args.host, port=_args.port, log_level="warning")
