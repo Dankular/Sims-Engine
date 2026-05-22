@@ -539,7 +539,7 @@ def main() -> None:
         tick_num = 0
         while _should_continue(tick_num):
             print_tick_header(engine)
-            engine.run_tick()
+            engine.heartbeat.beat_once()
             print_active_sims(engine)
             if _tracker:
                 _tracker.snapshot(engine.tick_count)

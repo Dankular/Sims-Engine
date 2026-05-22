@@ -25,7 +25,7 @@ class CapturingBackend:
         return '{"sim_b_reaction":"ok","friendship_delta":1,"romance_delta":0,"social_need_restore_a":5,"social_need_restore_b":5,"fun_restore_a":2,"fun_restore_b":2,"emotion_a":"joy","emotion_b":"neutral","valence":0.6,"memory_tag":"said hello","charisma_xp_a":0,"comedy_xp_a":0,"reasoning":"test"}'
 
 engine = SimEngine(sims=sims, llm=CapturingBackend(), datasets=datasets, db=PersistenceLayer())
-engine.run_tick()
+engine.heartbeat.beat_once()
 
 import time; time.sleep(0.3)
 

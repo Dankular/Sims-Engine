@@ -120,50 +120,59 @@ class HeartbeatLoop:
         # ── 1. Need decay — proportional to real elapsed seconds ──────────────
         self._decay_needs(dt)
 
-        # ── 2. Autonomous self-care ───────────────────────────────────────────
+        # ── 2. Drain LLM async futures ────────────────────────────────────────
+        try:
+            eng.process_pending()
+        except Exception as exc:
+            logger.debug("[Heartbeat] process_pending: %s", exc)
+
+        # ── 3. Per-sim arc / goal / dream processing (budgeted) ───────────────
+        try:
+            eng.process_sims(dt)
+        except Exception as exc:
+            logger.debug("[Heartbeat] process_sims: %s", exc)
+
+        # ── 4. Autonomous self-care ───────────────────────────────────────────
         self._self_care()
 
-        # ── 3. Bank maturity check ────────────────────────────────────────────
+        # ── 5. World / economy systems ────────────────────────────────────────
+        try:
+            eng.tick_world_systems(now)
+        except Exception as exc:
+            logger.debug("[Heartbeat] tick_world_systems: %s", exc)
+
+        # ── 6. Emergent social / narrative systems ────────────────────────────
+        try:
+            eng.tick_emergent_systems(now)
+        except Exception as exc:
+            logger.debug("[Heartbeat] tick_emergent_systems: %s", exc)
+
+        # ── 7. Bank maturity check ────────────────────────────────────────────
         if hasattr(eng, "bank"):
             try:
                 eng.bank.check_maturities(eng)
             except Exception as exc:
-                logger.debug("[Heartbeat] bank check error: %s", exc)
+                logger.debug("[Heartbeat] bank check: %s", exc)
 
-        # ── 4. Collateral evaluation ──────────────────────────────────────────
+        # ── 8. Collateral evaluation ──────────────────────────────────────────
         if hasattr(eng, "collateral"):
             for sim in eng.sims:
                 if sim.simoleons < COLLATERAL_TRIGGER_BALANCE:
                     try:
                         eng.collateral.evaluate(sim, eng)
-                    except Exception as exc:
-                        logger.debug("[Heartbeat] collateral error: %s", exc)
+                    except Exception:
+                        pass
 
-        # ── 5. Cadenced real-time events ──────────────────────────────────────
+        # ── 9. Cadenced real-time events (gossip, career, decay, autosave …) ──
         self._fire_cadenced(now)
 
-        # ── 6. Chain node + web3 bridge ───────────────────────────────────────
-        try:
-            eng.chain_node.tick()
-            eng.web3.tick(eng)
-            eng.web3.sync_balances(eng)
-        except Exception as exc:
-            logger.debug("[Heartbeat] chain tick: %s", exc)
-
-        # ── 7. LOD reassignment ───────────────────────────────────────────────
-        try:
-            from engine.lod import assign_lod_tiers
-            assign_lod_tiers(eng.sims)
-        except Exception:
-            pass
-
-        # ── 8. Pair selection + LLM interaction (budget-limited) ──────────────
+        # ── 10. LLM pair selection (budget-limited, one per beat) ─────────────
         try:
             self._maybe_interact()
         except Exception as exc:
             logger.debug("[Heartbeat] interaction: %s", exc)
 
-        # ── 9. Emit heartbeat event for analytics/sockets ─────────────────────
+        # ── 11. Heartbeat event ───────────────────────────────────────────────
         try:
             eng._bus.emit("heartbeat", dt=dt, now=now)
         except Exception:

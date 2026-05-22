@@ -96,7 +96,7 @@ def main() -> None:
     interval = max(1, args.ticks // 20)  # progress every 5%
 
     for tick in range(args.ticks):
-        engine.run_tick()
+        engine.heartbeat.beat_once()
         if (tick + 1) % interval == 0:
             elapsed = time.time() - t_start
             rate = (tick + 1) / elapsed

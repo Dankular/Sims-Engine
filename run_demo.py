@@ -84,7 +84,7 @@ for evt in [
     "hr_sanction", "agreement_fulfilled", "loan_default",
     "heartbeat", "chain_block",
 ]:
-    eng._bus.on(evt, lambda **kw, _t=evt: _log(_t, **kw))
+    eng._bus.on(evt, lambda _t=evt, **kw: _log(_t, **kw))
 
 # ── Seed initial state ────────────────────────────────────────────────────────
 from persistence.ledger import (
@@ -151,10 +151,7 @@ collateral_events  = 0
 
 for beat in range(1, args.beats + 1):
 
-    # --- Run one LLM interaction tick (mock backend) ---
-    eng.run_tick()
-
-    # --- Apply real-time heartbeat with configured dt ---
+    # One full heartbeat beat at the configured simulated dt
     now = time.time()
     eng.heartbeat._beat(SIM_SECONDS_PER_BEAT, now)
 

@@ -834,7 +834,7 @@ def tick():
     llm_before = len(list(timing_store._llm))
     t0 = time.monotonic()
     with _engine_lock:
-        eng.run_tick()
+        eng.heartbeat.beat_once()
     tick_elapsed = time.monotonic() - t0
     timing_store.record_tick(eng.tick_count, tick_elapsed)
     # Surface the most recent LLM call if one fired during this tick
@@ -3115,7 +3115,7 @@ async def _online_world_loop() -> None:
         await asyncio.sleep(1.0)
         eng = _get_engine()
         with _engine_lock:
-            eng.run_tick()
+            eng.heartbeat.beat_once()
             _online_world.cleanup_expired_sessions()
         await _broadcast_online_rooms()
 

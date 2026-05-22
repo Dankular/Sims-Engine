@@ -150,7 +150,7 @@ eng_mod.build_adjudicator_system = _wrap_adjudicator_system
 
 # ── Fire one tick ─────────────────────────────────────────────────────────────
 print("Running one tick to capture a real adjudicator prompt...\n")
-engine.run_tick()
+engine.heartbeat.beat_once()
 import time; time.sleep(0.5)  # let thread pool settle
 
 sys_prompt = backend.last_system

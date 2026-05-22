@@ -20,7 +20,7 @@ def create_app(engine: SimEngine):
 
     @app.post("/tick")
     def tick():
-        engine.run_tick()
+        engine.heartbeat.beat_once()
         return engine.get_state()
 
     return app
