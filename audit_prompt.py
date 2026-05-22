@@ -19,13 +19,11 @@ from core.sim import Sim
 from world.households import assign_households
 from persistence.sqlite import PersistenceLayer
 from engine.engine import SimEngine
-from llm.backend import OllamaBackend
-
 datasets = load_all_datasets()
 sims = [Sim(generate_sim_profile(okcupid_essays=datasets.okcupid_essays)) for _ in range(2)]
 assign_households(sims)
 
-# Dummy backend — records the prompt but never calls Ollama
+# Dummy backend — captures prompt without calling any LLM
 class CapturingBackend:
     last_system = ""
     last_user = ""

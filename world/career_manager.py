@@ -272,6 +272,34 @@ class CareerManager:
         level_def = self._get_level_def(sim)
         if level_def and level_def.salary_per_tick > 0:
             bonus = 1.0 + (sim.career_performance - 50.0) / 200.0
+            _eng = getattr(sim, '_engine_ref', None)
+        if _eng:
+            from persistence.ledger import TX_SALARY
+            _eng._tx(sim, round(level_def.salary_per_tick * bonus, 2), TX_SALARY,
+                     counterpart=getattr(sim, 'career_id', ''),
+                     description=f'career salary: {self._get_title(sim)}')
+        else:
+            _eng = getattr(sim, '_engine_ref', None)
+        if _eng:
+            from persistence.ledger import TX_SALARY
+            _eng._tx(sim, round(level_def.salary_per_tick * bonus, 2), TX_SALARY,
+                     counterpart=getattr(sim, 'career_id', ''),
+                     description=f'career salary: {self._get_title(sim)}')
+        else:
+            _eng = getattr(sim, '_engine_ref', None)
+        if _eng:
+            from persistence.ledger import TX_SALARY
+            _eng._tx(sim, round(level_def.salary_per_tick * bonus, 2), TX_SALARY,
+                     counterpart=getattr(sim, 'career_id', ''),
+                     description=f'career salary: {self._get_title(sim)}')
+        else:
+            _eng = getattr(sim, '_engine_ref', None)
+        if _eng:
+            from persistence.ledger import TX_SALARY
+            _eng._tx(sim, round(level_def.salary_per_tick * bonus, 2), TX_SALARY,
+                     counterpart=getattr(sim, 'career_id', ''),
+                     description=f'career salary: {self._get_title(sim)}')
+        else:
             sim.simoleons += round(level_def.salary_per_tick * bonus, 2)
 
     # ── Helpers ──────────────────────────────────────────────────────────────────

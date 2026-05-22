@@ -102,6 +102,36 @@ def load_literotica_snippets() -> list[str]:
     return out
 
 
+def load_reddit_nsfw_titles() -> list[str]:
+    key = "reddit_nsfw_titles"
+    cached = cache_load(key)
+    if cached:
+        return cached
+    out: list[str] = []
+    try:
+        from datasets import load_dataset
+
+        ds = load_dataset(
+            "surry-hills-druid/reddit-nsfw-titles-sexual-language",
+            split="train",
+            streaming=True,
+            trust_remote_code=True,
+        )
+        for row in ds:
+            if len(out) >= 1200:
+                break
+            text = str(
+                row.get("title") or row.get("text") or row.get("content") or ""
+            ).strip()
+            if 12 <= len(text) <= 220:
+                out.append(text)
+    except Exception:
+        pass
+    if out:
+        cache_save(key, out)
+    return out
+
+
 def sample_sensual_line() -> str | None:
     pool = load_sensual_speech_patterns()
     return random.choice(pool) if pool else None
@@ -109,4 +139,9 @@ def sample_sensual_line() -> str | None:
 
 def sample_literotica_snippet() -> str | None:
     pool = load_literotica_snippets()
+    return random.choice(pool) if pool else None
+
+
+def sample_reddit_nsfw_title() -> str | None:
+    pool = load_reddit_nsfw_titles()
     return random.choice(pool) if pool else None

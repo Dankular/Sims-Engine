@@ -1,8 +1,9 @@
-"""JSON schemas passed to Ollama's format field for grammar-constrained generation."""
+"""JSON schemas for grammar-constrained generation (llama-server response_format)."""
 
 ADJUDICATOR_SCHEMA = {
     "type": "object",
     "properties": {
+        "dialogue":              {"type": "string"},
         "sim_b_reaction":        {"type": "string"},
         "friendship_delta":      {"type": "number"},
         "romance_delta":         {"type": "number"},
@@ -34,7 +35,9 @@ ADJUDICATOR_SCHEMA = {
         "social_need_restore_a", "social_need_restore_b",
         "fun_restore_a", "fun_restore_b",
         "emotion_a", "emotion_b", "valence",
-        "memory_tag", "charisma_xp_a", "comedy_xp_a", "reasoning",
+        "memory_tag", "charisma_xp_a", "comedy_xp_a",
+        # "reasoning" is intentionally optional — small models exhaust token budget
+        # writing long reasoning text before closing the JSON object.
     ],
 }
 

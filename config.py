@@ -13,14 +13,13 @@ from pathlib import Path
 #   Phi-4-mini  — ~2.5 GB Q4, stronger reasoning, good for complex dilemmas
 #   Llama-3.2-3B — ~2 GB Q4, widely available
 #
-# Ollama equivalents: qwen2.5:3b | phi4-mini | llama3.2:3b
 GGUF_REPO = "Qwen/Qwen2.5-3B-Instruct-GGUF"
-GGUF_FILENAME = "Qwen2.5-3B-Instruct-Q4_K_M.gguf"
+GGUF_FILENAME = "qwen2.5-3b-instruct-q4_k_m.gguf"
 # Alternative: Phi-4-mini (stronger reasoning, slightly larger)
 # GGUF_REPO     = "bartowski/Phi-4-mini-instruct-GGUF"
 # GGUF_FILENAME = "Phi-4-mini-instruct-Q4_K_M.gguf"
 GGUF_N_CTX = 4096  # 4 k is plenty for our ~800-token prompts; saves RAM
-GGUF_GPU_LAYERS = -1  # -1 = all layers on GPU; 0 = CPU-only
+GGUF_GPU_LAYERS = 0   # 0 = CPU-only (stable); -1 = all layers on GPU
 GGUF_N_THREADS = None  # None = auto
 
 # Whether to prefix user messages with Qwen3's /no_think directive.
@@ -66,7 +65,6 @@ HF_EMOTION_CLASSIFIER_ML = (
 # MBTI inference from text
 HF_MBTI_MODEL = "theta/MBTI-ckiplab-bert"
 # Background LOD — even lighter; 1.5B is sufficient for the compact bg prompt
-# Ollama equivalent: qwen2.5:1.5b
 GGUF_BG_REPO = "Qwen/Qwen2.5-1.5B-Instruct-GGUF"
 GGUF_BG_FILENAME = "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
 HF_OKCUPID_DATASET = "SpiceeChat/OkCupid-59k-Anonymized-Profiles"
@@ -98,8 +96,60 @@ CACHE_DIR = Path(__file__).parent / ".sim_cache"
 SIM_DB_PATH = str(Path(__file__).parent / "sim_state.db")
 
 # ── Simulation timing ─────────────────────────────────────────────────────────
-TICK_SECONDS = 0.5
+TICK_SECONDS    = 0.5
 GAME_START_HOUR = 8
+
+# ── Real-time heartbeat (replaces tick-based scheduling) ──────────────────────
+# The server runs a background loop every HEARTBEAT_INTERVAL seconds.
+# All game rates are expressed per-second so dt math is straightforward.
+HEARTBEAT_INTERVAL = 10.0          # seconds between heartbeats
+
+# Need decay rates — per second, true 1:1 real-time scale.
+#   Hunger depletes in ~8 h  → 100 / (8 * 3600)
+#   Energy depletes in ~16 h → 100 / (16 * 3600)
+#   Social depletes in ~24 h → 100 / (24 * 3600)
+#   Fun    depletes in ~12 h → 100 / (12 * 3600)
+#   Hygiene depletes in 72 h → 100 / (72 * 3600)
+#   Bladder depletes in 4 h  → 100 / (4 * 3600)
+#   Comfort depletes in 48 h → 100 / (48 * 3600)
+#   Environment depletes in 24 h
+NEED_DECAY_RATES: dict[str, float] = {
+    "hunger":      100 / (8  * 3600),   # 0.00347 /s
+    "energy":      100 / (16 * 3600),   # 0.00174 /s
+    "social":      100 / (24 * 3600),   # 0.00116 /s
+    "fun":         100 / (12 * 3600),   # 0.00231 /s
+    "hygiene":     100 / (72 * 3600),   # 0.00039 /s
+    "environment": 100 / (24 * 3600),   # 0.00116 /s
+    "bladder":     100 / ( 4 * 3600),   # 0.00694 /s
+    "comfort":     100 / (48 * 3600),   # 0.00058 /s
+}
+
+# Cadenced operation intervals (seconds of real elapsed time)
+RT_CAREER_EVENT_INTERVAL    = 1800    # 30 min
+RT_LIFE_EVENT_INTERVAL      = 3600    # 1 hour
+RT_GOSSIP_INTERVAL          = 300     # 5 min
+RT_RELATIONSHIP_DECAY       = 3600    # 1 hour
+RT_VENUE_ROTATION           = 600     # 10 min
+RT_AUTOSAVE_INTERVAL        = 300     # 5 min
+RT_SNAPSHOT_INTERVAL        = 600     # 10 min
+
+# ── Bank ──────────────────────────────────────────────────────────────────────
+# Term deposits: locked for DURATION, earn APR * (duration / 365 days)
+BANK_TERMS: dict[str, dict] = {
+    "1_week":   {"seconds": 7   * 86400, "apr": 0.015, "label": "1 Week"},
+    "2_weeks":  {"seconds": 14  * 86400, "apr": 0.025, "label": "2 Weeks"},
+    "1_month":  {"seconds": 30  * 86400, "apr": 0.040, "label": "1 Month"},
+    "3_months": {"seconds": 90  * 86400, "apr": 0.060, "label": "3 Months"},
+    "1_year":   {"seconds": 365 * 86400, "apr": 0.100, "label": "1 Year"},
+}
+BANK_MIN_DEPOSIT    = 10.0        # minimum deposit amount
+BANK_EARLY_PENALTY  = 0.02        # 2% penalty fee for early break (NOT allowed by default)
+BANK_RESERVE_RATIO  = 0.10        # bank keeps 10% reserve; 90% lent out (affects lending APR)
+
+# ── Collateral ────────────────────────────────────────────────────────────────
+COLLATERAL_TRIGGER_BALANCE = -50.0    # simoleons floor before collateral evaluation
+COLLATERAL_CREDIT_RATIO    = 0.70     # lend up to 70% of asset collateral value
+COLLATERAL_MARGIN_CALL     = -500.0   # below this triggers forced asset liquidation
 
 # ── Needs ─────────────────────────────────────────────────────────────────────
 NEEDS_DECAY = 3.0
@@ -150,12 +200,33 @@ FEAR_REDUCTION = 0.12
 LOD_ACTIVE_LIMIT = 20
 LOD_BACKGROUND_LIMIT = 120
 
+# ── SimChain (blockchain) ─────────────────────────────────────────────────────
+# Ticks between PoA block productions (lower = faster confirmation, more CPU)
+CHAIN_BLOCK_INTERVAL = 5
+# Auto-invest threshold: sims invest idle $SIM above this balance
+CHAIN_AUTO_INVEST_THRESHOLD = 500.0
+# Fraction of surplus $SIM invested per auto-invest tick
+CHAIN_AUTO_INVEST_FRACTION = 0.05
+# Minimum openness score for a sim to auto-invest
+CHAIN_AUTO_INVEST_OPENNESS = 0.65
+
+# ── Budgeted tick scheduler ───────────────────────────────────────────────────
+# Max sims receiving full sim.tick() + arcs + goals processing per tick.
+# Set ≤ LOD_ACTIVE_LIMIT.  Lower = cheaper ticks; higher = less latency per sim.
+ACTIVE_SIMS_PER_TICK = 8
+# Background sims that get heuristic interaction per tick.
+BG_SIMS_PER_TICK = 4
+
+# ── Event sourcing ────────────────────────────────────────────────────────────
+# How often to write a full world snapshot (ticks).  Deltas fill the gaps.
+SNAPSHOT_INTERVAL = 50
+
 # ── Schedule phases ───────────────────────────────────────────────────────────
 SCHEDULE_WORK = set(range(9, 17))
 SCHEDULE_SOCIAL = set(range(18, 23))
 
 # ── Async adjudication ────────────────────────────────────────────────────────
-ADJ_WORKERS = 3
+ADJ_WORKERS = 1
 
 # ── Shops ────────────────────────────────────────────────────────────────────
 SHOP_DEFS = [
@@ -165,6 +236,68 @@ SHOP_DEFS = [
     {"name": "convenience store", "need": "hunger", "cost": 12, "restore": 40},
 ]
 LOW_NEED_SHOP_THRESHOLD = 25
+
+# Curated marketplace shops (specialized lots)
+MARKET_SHOPS = [
+    {
+        "lot_id": "shop_grocer",
+        "name": "Grocer",
+        "focus": ["Candy", "Alcohol", "Energy Drink", "Medical"],
+        "venue_assignment": "restaurant",
+    },
+    {
+        "lot_id": "shop_bookstore",
+        "name": "Bookstore",
+        "focus": ["Book", "Artifact", "Collectible"],
+        "venue_assignment": "library",
+    },
+    {
+        "lot_id": "shop_outfitter",
+        "name": "Outfitter",
+        "focus": ["Weapon", "Armor", "Tool", "Clothing"],
+        "venue_assignment": "retail_store",
+    },
+    {
+        "lot_id": "shop_arcade",
+        "name": "Arcade",
+        "focus": ["Temporary", "Booster", "Collectible"],
+        "venue_assignment": "nightclub",
+    },
+    {
+        "lot_id": "shop_petstore",
+        "name": "Pet Store",
+        "focus": ["Pet", "Pet Supply", "Plushie", "Special", "Collectible"],
+        "venue_assignment": "retail_store",
+    },
+]
+
+# Curated marketplace shops (specialized lots)
+MARKET_SHOPS = [
+    {
+        "lot_id": "shop_grocer",
+        "name": "Grocer",
+        "focus": ["Candy", "Alcohol", "Energy Drink", "Medical"],
+        "venue_assignment": "restaurant",
+    },
+    {
+        "lot_id": "shop_bookstore",
+        "name": "Bookstore",
+        "focus": ["Book", "Artifact", "Collectible"],
+        "venue_assignment": "library",
+    },
+    {
+        "lot_id": "shop_outfitter",
+        "name": "Outfitter",
+        "focus": ["Weapon", "Armor", "Tool", "Clothing"],
+        "venue_assignment": "retail_store",
+    },
+    {
+        "lot_id": "shop_arcade",
+        "name": "Arcade",
+        "focus": ["Temporary", "Booster", "Collectible"],
+        "venue_assignment": "nightclub",
+    },
+]
 
 # ── Autonomous self-care (free, no simoleons required) ────────────────────────
 # Sleep — restores energy when critically low
@@ -392,9 +525,53 @@ EMOTIONS_27 = [
 ]
 
 INTERACTION_TYPES = {
-    "friendly": ["chat", "tell story", "share joke", "compliment", "ask about day"],
-    "funny": ["tell joke", "do impression", "share meme", "playful tease"],
-    "mean": ["insult", "mock", "argue", "spread rumour"],
+    # ── Existing categories — extended ───────────────────────────────────────
+    "friendly": [
+        "chat",
+        "tell story",
+        "share joke",
+        "compliment",
+        "ask about day",
+        "active listening",
+        "check in emotionally",
+        "borrow item",
+        "invite to event",
+        # extensions
+        "celebrate milestone",
+        "give recommendation",
+        "invite to activity",
+        "check in on health",
+        "catch up after time apart",
+        # organically emerged from simulation
+        "join the celebration",
+        "celebrate_holiday",
+    ],
+    "funny": [
+        "tell joke",
+        "do impression",
+        "share meme",
+        "playful tease",
+        # extensions
+        "trade one-liners",
+        "do character impression",
+        "tell pun",
+        "light roast",
+        "quote from film",
+        "impersonate mutual friend",
+    ],
+    "mean": [
+        "insult",
+        "mock",
+        "argue",
+        "spread rumour",
+        "complain about noise",
+        # extensions
+        "give cold shoulder",
+        "passive aggression",
+        "dismiss concerns",
+        "one-up story",
+        "backhanded compliment",
+    ],
     "romantic": [
         "flirt",
         "compliment appearance",
@@ -402,10 +579,143 @@ INTERACTION_TYPES = {
         "hold hands",
         "give gift",
         "reassure partner",
+        "plan date night",
+        "affection check-in",
+        # extensions
+        "write love note",
+        "slow dance",
+        "love language check-in",
+        "serenade",
+        "express admiration",
     ],
-    "intimate": ["speak tenderly", "share private hope", "express longing"],
-    "deep": ["share secret", "discuss fears", "give life advice", "confide"],
+    "intimate": [
+        "speak tenderly",
+        "share private hope",
+        "express longing",
+        "reminisce together",
+        # extensions
+        "discuss relationship future",
+        "build shared vision",
+        "attachment check-in",
+        "share deepest fear",
+    ],
+    "deep": [
+        "share secret",
+        "discuss fears",
+        "give life advice",
+        "confide",
+        "apologize sincerely",
+        "set boundary",
+        # extensions
+        "pose moral dilemma",
+        "admit mistake",
+        "challenge belief",
+        "define your values",
+        "process past regret",
+        "ask for honest feedback",
+    ],
+
+    # ── New categories ────────────────────────────────────────────────────────
+    # Emotional labour — mental health support, validation, EI
+    "support": [
+        "offer emotional support",
+        "validate feelings",
+        "sit in silence together",
+        "name what you are feeling",
+        "suggest coping strategy",
+        "check in on mental wellbeing",
+        # organically emerged from simulation
+        "reach out to share feelings and seek comfort",
+        "open up about struggles",
+    ],
+    # Logic, philosophy, ethics — debate and thought experiments
+    "intellectual": [
+        "debate an issue",
+        "challenge assumption",
+        "discuss philosophy",
+        "propose thought experiment",
+        "defend position",
+        "present counterargument",
+        # organically emerged from simulation
+        "debate an idea",
+        "share a learning insight",
+        "ask thoughtful questions",
+        "debate topic",
+    ],
+    # Shared physical or creative pursuits
+    "activity": [
+        "cook together",
+        "work out together",
+        "plan a trip",
+        "collaborate on project",
+        "play a game together",
+        "explore shared interest",
+        # organically emerged from simulation
+        "have a snowball fight",
+        "build something together",
+        "share artwork",
+        "cook gourmet meal",
+    ],
+    # Memory-driven reminiscing — grounded in hippocorpus narrative modes
+    "nostalgic": [
+        "recall shared memory",
+        "revisit old times",
+        "share origin story",
+        "relive a favourite moment",
+        "piece together what happened",
+    ],
+    # Post-conflict reconciliation and forgiveness
+    "repair": [
+        "offer to reconcile",
+        "work through conflict",
+        "suggest fresh start",
+        "own your part in an argument",
+        "address the elephant in the room",
+        # organically emerged from simulation
+        "make_resolution",
+        "seek resolution",
+    ],
+    # Manipulation and dark social tactics — gated on personality/trait
+    "toxic": [
+        "guilt trip",
+        "gaslight",
+        "love bomb",
+        "silent treatment",
+        "issue ultimatum",
+    ],
+    # Practical real-world concerns — finance, health, problem-solving
+    "practical": [
+        "ask for financial advice",
+        "discuss money worries",
+        "offer practical help",
+        "troubleshoot a problem",
+        "share health concern",
+    ],
+    # Early-stage organic preference discovery — grounded in CCPE
+    "discovery": [
+        "ask a follow-up question",
+        "share a preference",
+        "compare life philosophies",
+        "find common ground",
+        "learn something new about them",
+        # organically emerged from simulation
+        "ask thoughtful questions",
+    ],
 }
+
+# ── Open-world action enrichment (Galaxea-derived) ───────────────────────────
+ENABLE_OPEN_WORLD_ACTIONS = True
+OPEN_WORLD_ACTIONS_CHANCE = 0.18
+OPEN_WORLD_ACTIONS_MAX_CANDIDATES = 3
+
+# ── Scheduler intelligence tuning ─────────────────────────────────────────────
+ENABLE_CONTEXT_SENSORS = True
+ENABLE_ACTION_PREREQS = True
+ENABLE_ACTION_CHAINS = True
+ENABLE_ACTION_INTERRUPTS = True
+ENABLE_ACTION_EXPLANATIONS = True
+ACTION_RISK_WEIGHT = 0.22
+ACTION_CHAIN_BOOST = 1.25
 
 VENUES = [
     {"name": "house party", "noise": 0.8, "intimacy": 0.3, "crowd": 0.9},
@@ -416,6 +726,7 @@ VENUES = [
     {"name": "home (1:1)", "noise": 0.1, "intimacy": 0.9, "crowd": 0.05},
     {"name": "gym", "noise": 0.5, "intimacy": 0.2, "crowd": 0.5},
     {"name": "library", "noise": 0.05, "intimacy": 0.5, "crowd": 0.2},
+    {"name": "shopping center", "noise": 0.6, "intimacy": 0.25, "crowd": 0.85},
 ]
 
 SKILL_DEFINITIONS = {

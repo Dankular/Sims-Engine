@@ -9,6 +9,15 @@ from core.traits import (
 )
 from core.social_chemistry import calculate_chemistry
 from core.species import can_perform_interaction
+from core.action_intelligence import (
+    apply_interruption,
+    build_action_chain,
+    compute_social_risk,
+    explain_choice,
+    score_action_feasibility,
+)
+from world.context_sensors import sense_context
+from core.action_prereqs import prerequisites_met
 
 if TYPE_CHECKING:
     from core.sim import Sim
@@ -28,8 +37,245 @@ _NLI_LABEL_TO_CAT: dict[str, str] = {
     "playful funny casual interaction": "funny",
     "hostile argumentative confrontation": "mean",
     "casual friendly conversation": "friendly",
+    # New categories
+    "emotional support or mental health counseling": "support",
+    "intellectual debate or philosophical discussion": "intellectual",
+    "nostalgic memory sharing or reminiscing": "nostalgic",
+    "conflict resolution reconciliation or forgiveness": "repair",
+    "manipulative controlling or toxic social behavior": "toxic",
 }
 _NLI_INTERACTION_LABELS = list(_NLI_LABEL_TO_CAT.keys())
+
+
+def _apply_stage_weights(
+    sim_a: "Sim",
+    sim_b: "Sim",
+    relationship: "RelationshipRecord",
+    candidates: list[tuple[str, float]],
+    datasets: "DatasetRegistry | None",
+) -> list[tuple[str, float]]:
+    """
+    Modulate candidate weights and inject dataset seeds according to the current
+    conversation escalation stage (small_talk → teasing → disclosure → affectionate_intent).
+
+    Organic feel comes from three signals layered together:
+      1. relationship score (friendship / romance thresholds)
+      2. moodlets (flirty/alluring shift the romantic track)
+      3. recent buffer valence momentum (average stored on each turn)
+      4. personality-adaptive arc multiplier from ConversationArcPolicy
+    """
+    stage = getattr(sim_a, "_conversation_stage", "small_talk")
+    consent = getattr(sim_a, "_consent_state", {}).get(sim_b.sim_id, "")
+    romance = relationship.romance
+    friendship = relationship.friendship
+
+    _both_adult = (
+        sim_a.profile.get("age", 0) >= 16 and sim_b.profile.get("age", 0) >= 16
+    )
+
+    # Personality-adaptive stage multiplier — scales all boosts for this stage
+    arc_mult = 1.0
+    try:
+        import engine.engine as _eng_mod
+
+        eng = getattr(_eng_mod, "_current_engine", None)
+        if eng is not None and hasattr(eng, "arc_policy"):
+            arc_mult = eng.arc_policy.stage_multiplier(
+                sim_a, sim_b, relationship, stage
+            )
+    except Exception:
+        pass
+
+    # ── Stage: teasing ────────────────────────────────────────────────────────
+    if stage == "teasing":
+        # Boost light-touch playful + early flirt + activity/discovery; suppress heavy deep/mean/toxic
+        teasing_kw = (
+            "tease",
+            "joke",
+            "banter",
+            "playful",
+            "flirt",
+            "compliment",
+            "one-liner",
+            "impression",
+            "pun",
+            "roast",
+            "quote",
+        )
+        tease_boost = max(0.1, 1.8 * arc_mult)
+        candidates = [
+            (a, w * tease_boost if any(k in a.lower() for k in teasing_kw) else w)
+            for a, w in candidates
+        ]
+        # Boost activity/discovery — playful phase is good for joint doing
+        for a, w in list(candidates):
+            if a in INTERACTION_TYPES.get("activity", []):
+                candidates = [(x, ww * 1.3 if x == a else ww) for x, ww in candidates]
+            if a in INTERACTION_TYPES.get("discovery", []):
+                candidates = [(x, ww * 1.2 if x == a else ww) for x, ww in candidates]
+        # Suppress mean and toxic
+        _suppress = set(INTERACTION_TYPES.get("mean", [])) | set(
+            INTERACTION_TYPES.get("toxic", [])
+        )
+        for a, w in list(candidates):
+            if a in _suppress:
+                candidates = [(x, ww * 0.35 if x == a else ww) for x, ww in candidates]
+        # Inject playful flirt line from dataset
+        if datasets is not None and hasattr(datasets, "flirtflip_index"):
+            try:
+                from datasets.romance import sample_flirt_line
+
+                line, tier = sample_flirt_line(min(romance, 30))  # cap at playful tier
+                if line and tier in ("light", "playful"):
+                    candidates.append(
+                        (
+                            f"[TEASE] {line[:200]}",
+                            1.4,
+                        )
+                    )
+            except Exception:
+                pass
+
+    # ── Stage: disclosure ─────────────────────────────────────────────────────
+    elif stage == "disclosure":
+        # Boost deep / support / nostalgic / intellectual; suppress comedy, mean, toxic
+        deep_boost = max(0.05, 0.8 * arc_mult)
+        for cat in ("deep", "support", "nostalgic", "intellectual"):
+            for action in INTERACTION_TYPES.get(cat, []):
+                candidates.append((action, deep_boost))
+        _disclosure_suppress = (
+            set(INTERACTION_TYPES.get("funny", []))
+            | set(INTERACTION_TYPES.get("mean", []))
+            | set(INTERACTION_TYPES.get("toxic", []))
+        )
+        candidates = [
+            (a, w * 0.35) if a in _disclosure_suppress else (a, w)
+            for a, w in candidates
+        ]
+        # Inject self-disclosure seed matched to current friendship depth
+        if datasets is not None and hasattr(datasets, "self_disclosure_depth"):
+            try:
+                from datasets.self_disclosure import sample_by_depth
+
+                disclosure, depth = sample_by_depth(friendship)
+                if disclosure:
+                    note = ""
+                    if depth == "deep" and friendship < 40:
+                        note = " (early deep disclosure — risk of over-sharing)"
+                    candidates.append(
+                        (
+                            f"[SELF-DISCLOSURE — {depth.upper()}]\n"
+                            f'Sim A shares: "{disclosure[:260]}"\n'
+                            f"Adjudicate for trust fit at this friendship depth.{note}",
+                            max(0.1, 1.6 * arc_mult),
+                        )
+                    )
+            except Exception:
+                pass
+
+    # ── Stage: affectionate_intent ────────────────────────────────────────────
+    elif stage == "affectionate_intent":
+        if consent == "withdrawn":
+            # Hard block on all romantic/intimate escalation
+            _block = set(INTERACTION_TYPES.get("romantic", [])) | set(
+                INTERACTION_TYPES.get("intimate", [])
+            )
+            candidates = [
+                (a, w * 0.05) if a in _block else (a, w) for a, w in candidates
+            ]
+            # Pivot to repair/support — rejection is a signal to de-escalate warmly
+            for action in INTERACTION_TYPES.get("repair", []):
+                candidates.append((action, 0.9))
+            for action in INTERACTION_TYPES.get("support", []):
+                candidates.append((action, 0.7))
+            return candidates  # skip dataset injections
+
+        # Suppress toxic/repair/mean — wrong tone for romantic intimacy
+        _aff_suppress = (
+            set(INTERACTION_TYPES.get("toxic", []))
+            | set(INTERACTION_TYPES.get("mean", []))
+            | set(INTERACTION_TYPES.get("repair", []))
+        )
+        candidates = [
+            (a, w * 0.05) if a in _aff_suppress else (a, w) for a, w in candidates
+        ]
+
+        # Boost full romantic tier (personality-scaled)
+        romantic_boost = max(0.05, 0.9 * arc_mult)
+        for action in INTERACTION_TYPES.get("romantic", []):
+            candidates.append((action, romantic_boost))
+        # Also boost nostalgic — shared memories deepen romantic moments
+        for action in INTERACTION_TYPES.get("nostalgic", []):
+            candidates.append((action, max(0.05, 0.5 * arc_mult)))
+
+        # Boost intimate tier if both adult + high romance
+        if _both_adult and romance >= 55 and "intimate" in INTERACTION_TYPES:
+            for action in INTERACTION_TYPES["intimate"]:
+                candidates.append(
+                    (action, max(0.05, (0.6 + romance / 300.0) * arc_mult))
+                )
+
+        # Attachment dynamics seed (INTIMA)
+        if (
+            datasets is not None
+            and hasattr(datasets, "intima_codes")
+            and datasets.intima_codes
+        ):
+            try:
+                from datasets.intimacy import sample_intima
+
+                prompt = sample_intima(sim_a.profile.get("attachment", "general"))
+                if prompt:
+                    candidates.append(
+                        (
+                            f"[PARTNERS DYNAMICS]\n"
+                            f"Attachment-aware interaction seed: {prompt[:320]}",
+                            1.5,
+                        )
+                    )
+            except Exception:
+                pass
+
+        # Suggestive register (adult tier 1)
+        if (
+            _both_adult
+            and datasets is not None
+            and hasattr(datasets, "sensual_patterns")
+            and datasets.sensual_patterns
+        ):
+            line = random.choice(datasets.sensual_patterns)
+            candidates.append(
+                (
+                    f"[INTIMATE — SUGGESTIVE]\n{line[:260]}",
+                    1.3,
+                )
+            )
+
+        # NSFW starter (adult tier 2) — only at high romance + consent given
+        if (
+            _both_adult
+            and consent == "given"
+            and romance >= 45
+            and datasets is not None
+            and hasattr(datasets, "reddit_nsfw_titles")
+            and datasets.reddit_nsfw_titles
+            and random.random() < 0.35
+        ):
+            try:
+                from datasets.adult import sample_reddit_nsfw_title
+
+                seed = sample_reddit_nsfw_title()
+                if seed:
+                    candidates.append(
+                        (
+                            f'[NSFW STARTER]\nSim A opens with: "{seed[:220]}"',
+                            1.5 + romance / 220.0,
+                        )
+                    )
+            except Exception:
+                pass
+
+    return candidates
 
 
 def _nli_boost_candidates(
@@ -86,6 +332,27 @@ def choose_interaction(
     current_tick: int = 0,
     datasets: Optional["DatasetRegistry"] = None,
 ) -> str:
+    # Neural policy forced choice (phase 3 planner override)
+    forced = getattr(sim_a, "_neural_forced_interaction", None)
+    if forced and not sim_a.is_on_cooldown(str(forced), current_tick):
+        sim_a._neural_forced_interaction = None
+        return str(forced)
+
+    # ── Intention stack bias (persistent multi-tick goals) ────────────────────
+    intentions = getattr(sim_a, "intentions", None)
+    if intentions is not None:
+        try:
+            bias_type, bias_target = intentions.active_bias()
+            if bias_type:
+                _bias_candidates = INTERACTION_TYPES.get(bias_type, [])
+                if _bias_candidates:
+                    if not bias_target or bias_target == sim_b.sim_id:
+                        _chosen = random.choice(_bias_candidates)
+                        if not sim_a.is_on_cooldown(_chosen, current_tick):
+                            return _chosen
+        except Exception:
+            pass
+
     # ── System 4: Goal-driven interaction takes priority ──────────────────────
     goal = getattr(sim_a, "_active_goal", None)
     if goal is not None:
@@ -107,6 +374,17 @@ def choose_interaction(
     mood = sim_a.emotion.dominant_valence
     ocean = sim_a.ocean
     candidates: list[tuple[str, float]] = []
+    env: dict[str, float] = {}
+    try:
+        from config import ENABLE_CONTEXT_SENSORS
+        import engine.engine as _eng_mod
+
+        if ENABLE_CONTEXT_SENSORS:
+            env = sense_context(
+                getattr(_eng_mod, "_current_engine", None), sim_a, sim_b
+            )
+    except Exception:
+        env = {}
 
     # ── Reputation gating — adjust base weights before building candidate list ─
     rep_b = getattr(sim_b, "reputation_score", 0.0)
@@ -165,6 +443,129 @@ def choose_interaction(
     for special in sim_a.skills.unlocked_interactions():
         candidates.append((special, 1.2))
 
+    # ── Support: emotional labour for a struggling partner ────────────────────
+    _sim_b_struggling = (
+        bool(sim_b.fears)
+        or sim_b.profile["ocean"].get("neuroticism", 0) > 0.6
+        or getattr(sim_b, "grief_stage", -1) >= 0
+        or sim_b.needs.social < 30
+    )
+    if friendship_score >= REL_FRIEND and _sim_b_struggling:
+        for action in INTERACTION_TYPES.get("support", []):
+            candidates.append((action, 1.2 + ocean["agreeableness"] * 0.5))
+
+    # ── Intellectual: debate, philosophy, thought experiments ─────────────────
+    _intellectual_ready = (
+        sim_a.skills.levels.get("logic", 0) >= 2
+        or ocean.get("openness", 0.5) > 0.65
+        or "genius" in sim_a.profile.get("traits", [])
+        or "bookworm" in sim_a.profile.get("traits", [])
+    )
+    if _intellectual_ready and friendship_score >= REL_ACQUAINTANCE:
+        for action in INTERACTION_TYPES.get("intellectual", []):
+            candidates.append((action, 0.6 + ocean.get("openness", 0.5) * 0.5))
+
+    # ── Activity: shared-interest physical or creative collaboration ──────────
+    _shared_interest_count = len(
+        set(sim_a.profile.get("interests", []))
+        & set(sim_b.profile.get("interests", []))
+    )
+    _activity_skill = max(
+        sim_a.skills.levels.get("cooking", 0),
+        sim_a.skills.levels.get("fitness", 0),
+        sim_a.skills.levels.get("creativity", 0),
+    )
+    if _shared_interest_count > 0 or _activity_skill >= 2:
+        for action in INTERACTION_TYPES.get("activity", []):
+            candidates.append((action, 0.7 + min(0.5, _shared_interest_count * 0.15)))
+
+    # ── Nostalgic: shared memory recall ──────────────────────────────────────
+    _shared_mem = int(getattr(relationship, "shared_memory_count", 0))
+    if friendship_score >= 65 and _shared_mem >= 3:
+        for action in INTERACTION_TYPES.get("nostalgic", []):
+            candidates.append((action, 1.6 + min(0.4, _shared_mem * 0.05)))
+
+    # ── Repair: post-conflict reconciliation ──────────────────────────────────
+    _conflict_sentiments = {
+        "betrayal",
+        "heartbreak",
+        "resentment",
+        "betrayed_trust",
+        "jealous_rage",
+    }
+    _has_conflict = any(
+        s.name in _conflict_sentiments for s in getattr(relationship, "sentiments", [])
+    )
+    if _has_conflict or relationship.in_toxic_cycle:
+        for action in INTERACTION_TYPES.get("repair", []):
+            candidates.append((action, 1.7 if _has_conflict else 1.1))
+
+    # ── Toxic: manipulation and dark social tactics ────────────────────────────
+    _toxic_traits = {"jealous", "evil", "hot-headed", "narcissistic", "manipulative"}
+    _is_manipulative = (
+        ocean.get("neuroticism", 0.5) > 0.7
+        and (
+            bool(_toxic_traits & set(sim_a.profile.get("traits", [])))
+            or relationship.in_toxic_cycle
+        )
+        and mood < 0.45
+    )
+    if _is_manipulative:
+        for action in INTERACTION_TYPES.get("toxic", []):
+            candidates.append((action, 0.4 + (1.0 - mood) * 0.9))
+
+    # ── Practical: finance, health, and problem-solving ───────────────────────
+    from config import LOW_FUNDS_THRESHOLD as _LFT
+
+    _practical_need = (
+        sim_a.simoleons < _LFT * 1.5
+        or getattr(sim_a, "health_status", "healthy") != "healthy"
+        or getattr(sim_b, "health_status", "healthy") != "healthy"
+    )
+    if _practical_need and friendship_score >= REL_ACQUAINTANCE:
+        for action in INTERACTION_TYPES.get("practical", []):
+            candidates.append(
+                (action, 0.9 + (0.3 if friendship_score >= REL_FRIEND else 0.0))
+            )
+
+    # ── Discovery: early-stage preference and personality exploration ──────────
+    _early_relationship = (
+        friendship_score < 35 or int(getattr(relationship, "interactions", 0)) < 8
+    )
+    if _early_relationship:
+        for action in INTERACTION_TYPES.get("discovery", []):
+            candidates.append((action, 0.85 + ocean.get("extraversion", 0.5) * 0.3))
+
+    # ── Conversation continuity / chain preference ───────────────────────────
+    last_chain = list(getattr(sim_a, "_action_chain", []) or [])
+    if last_chain:
+        from config import ACTION_CHAIN_BOOST, ENABLE_ACTION_CHAINS
+
+        if ENABLE_ACTION_CHAINS:
+            candidates.append((last_chain[0], ACTION_CHAIN_BOOST))
+
+    # ── Open-world action enrichment (feature-flagged) ───────────────────────
+    try:
+        from config import (
+            ENABLE_OPEN_WORLD_ACTIONS,
+            OPEN_WORLD_ACTIONS_CHANCE,
+            OPEN_WORLD_ACTIONS_MAX_CANDIDATES,
+        )
+
+        if ENABLE_OPEN_WORLD_ACTIONS and random.random() < OPEN_WORLD_ACTIONS_CHANCE:
+            from datasets.open_world_actions import sample_action_candidates
+
+            candidates.extend(
+                sample_action_candidates(
+                    sim_a,
+                    sim_b,
+                    relationship,
+                    max_candidates=max(1, int(OPEN_WORLD_ACTIONS_MAX_CANDIDATES)),
+                )
+            )
+    except Exception:
+        pass
+
     # ── Grief / isolation support bias ───────────────────────────────────────
     _grief_active = getattr(sim_a, "grief_stage", -1) >= 0
     _post_grief_isolated = (
@@ -181,13 +582,23 @@ def choose_interaction(
         candidates.append(("confide in someone trusted", 1.6))
         # Suppress mean/funny — inappropriate while grieving.
         # Match the full "mean" + "funny" category sets and common comedy keywords.
-        _grief_suppress_set = (
-            set(INTERACTION_TYPES.get("mean", []))
-            | set(INTERACTION_TYPES.get("funny", []))
+        _grief_suppress_set = set(INTERACTION_TYPES.get("mean", [])) | set(
+            INTERACTION_TYPES.get("funny", [])
         )
         _grief_suppress_kw = (
-            "insult", "mock", "roast", "prank", "joke", "impression",
-            "meme", "tease", "argue", "rumour", "bully", "taunt", "comedy",
+            "insult",
+            "mock",
+            "roast",
+            "prank",
+            "joke",
+            "impression",
+            "meme",
+            "tease",
+            "argue",
+            "rumour",
+            "bully",
+            "taunt",
+            "comedy",
         )
         candidates = [
             (a, w * 0.1)
@@ -205,6 +616,67 @@ def choose_interaction(
         candidates.append(("offer condolences", 2.0))
         candidates.append(("check in on how they're doing", 1.8))
         candidates.append(("share a fond memory of what was lost", 1.5))
+
+    # ── Grim Reaper lingering — push toward grim-specific interactions ────────
+    try:
+        import engine.engine as _eng_mod
+
+        _gr = getattr(getattr(_eng_mod, "_current_engine", None), "grim_reaper", None)
+        if _gr and _gr.is_present and _gr._linger:
+            _grim_lot = _gr.lot_id
+            _sim_lot = getattr(sim_a, "household_id", None)
+            if _sim_lot and _sim_lot == _grim_lot:
+                from world.grim_reaper import GRIM_SOCIAL_INTERACTIONS
+
+                for grim_action in GRIM_SOCIAL_INTERACTIONS:
+                    candidates.append((grim_action, 1.6))
+                # Plead if recently grieving
+                if getattr(sim_a, "grief_stage", -1) >= 0:
+                    candidates.append(("plead with grim reaper", 2.5))
+                # Chess if sim has decent logic
+                if sim_a.skills.levels.get("logic", 0) >= 3:
+                    candidates.append(("challenge grim to chess", 2.0))
+    except Exception:
+        pass
+
+    # ── Item-aware interaction bonuses ───────────────────────────────────────
+    _inv_types = {
+        str(o.get("type", "")) for o in getattr(sim_a, "inventory_objects", [])
+    }
+    if "Book" in _inv_types or "Artifact" in _inv_types:
+        candidates.append(("read together", 1.3))
+        candidates.append(("discuss what you're reading", 1.1))
+    if "Alcohol" in _inv_types:
+        candidates.append(("share a drink", 1.4))
+        candidates.append(("toast together", 1.2))
+    if "Flower" in _inv_types:
+        candidates.append(("give flowers", 1.5))
+    if "Energy Drink" in _inv_types:
+        candidates.append(("share energy drinks", 1.0))
+    if "Collectible" in _inv_types:
+        candidates.append(("show off collection", 1.0))
+    if "Jewelry" in _inv_types or "Clothing" in _inv_types:
+        candidates.append(("show off new outfit", 1.0))
+    if _inv_types & {"Weapon", "Armor", "Explosive"}:
+        candidates.append(("show weapon collection", 0.9))
+
+    # ── Venue sensor weighting (noise/crowd/intimacy) ───────────────────────
+    v = getattr(sim_a, "_current_venue", {}) or {}
+    noise = float(v.get("noise", 0.0) or 0.0)
+    crowd = float(v.get("crowd", 0.0) or 0.0)
+    intimacy = float(v.get("intimacy", 0.0) or 0.0)
+    if noise > 0.65 or crowd > 0.7:
+        candidates = [
+            (a, w * 0.75 if a in INTERACTION_TYPES.get("deep", []) else w)
+            for a, w in candidates
+        ]
+        for action in INTERACTION_TYPES.get("friendly", [])[:2]:
+            candidates.append((action, 0.22))
+    if intimacy > 0.6:
+        for action in INTERACTION_TYPES.get("deep", []):
+            candidates.append((action, 0.22))
+        for action in INTERACTION_TYPES.get("romantic", []):
+            candidates.append((action, 0.18))
 
     # ── Skill-based interaction weighting ────────────────────────────────────
     skill_boost_map = {
@@ -376,6 +848,14 @@ def choose_interaction(
                 "simoleons": sim_a.simoleons,
                 "career_performance": sim_a.career_performance,
                 "romance": getattr(sim_a, "_current_romance", 0),
+                "net_worth": float(
+                    getattr(sim_a, "_portfolio_view", {}).get(
+                        "net_worth", sim_a.simoleons
+                    )
+                ),
+                "liability_value": float(
+                    getattr(sim_a, "_portfolio_view", {}).get("liability_value", 0.0)
+                ),
             }
             entry = sample_aita_for_topic(sim_state)
             if entry:
@@ -473,12 +953,14 @@ def choose_interaction(
                     )
                 )
 
-        # Self-disclosure depth curve — stage-appropriate confiding
+        # Self-disclosure depth curve — deferred to stage system in "disclosure" stage
+        _conv_stage = getattr(sim_a, "_conversation_stage", "small_talk")
         if (
             random.random() < 0.06
             and friendship_score >= 20
             and hasattr(datasets, "self_disclosure_depth")
             and datasets.self_disclosure_depth
+            and _conv_stage != "disclosure"
         ):
             from datasets.self_disclosure import sample_by_depth
 
@@ -499,8 +981,11 @@ def choose_interaction(
                 )
 
         # Romance dataset grounding — flirtflip tiers + charisma rizz unlock
-        if friendship_score >= REL_ACQUAINTANCE and hasattr(
-            datasets, "flirtflip_index"
+        # Deferred to stage system when in teasing/affectionate_intent stages
+        if (
+            friendship_score >= REL_ACQUAINTANCE
+            and hasattr(datasets, "flirtflip_index")
+            and _conv_stage not in ("teasing", "affectionate_intent")
         ):
             from datasets.romance import sample_flirt_line, sample_rizz_intro
 
@@ -532,11 +1017,12 @@ def choose_interaction(
                         )
                     )
 
-        # Partners-state attachment dynamics (INTIMA)
+        # Partners-state attachment dynamics (INTIMA) — deferred to stage system
         if (
             romance_score >= 80
             and hasattr(datasets, "intima_codes")
             and datasets.intima_codes
+            and _conv_stage != "affectionate_intent"
         ):
             from datasets.intimacy import sample_intima
 
@@ -550,8 +1036,7 @@ def choose_interaction(
                     )
                 )
 
-        # Adult tier 1: suggestive but non-explicit intimate register
-        # Age-gated: both sims must be >= 16
+        # Adult tier 1: suggestive register — deferred to stage system
         _both_of_age = (
             sim_a.profile.get("age", 0) >= 16 and sim_b.profile.get("age", 0) >= 16
         )
@@ -560,6 +1045,7 @@ def choose_interaction(
             and _both_of_age
             and hasattr(datasets, "sensual_patterns")
             and datasets.sensual_patterns
+            and _conv_stage != "affectionate_intent"
         ):
             line = random.choice(datasets.sensual_patterns)
             candidates.append(
@@ -568,6 +1054,49 @@ def choose_interaction(
                     1.1,
                 )
             )
+
+        # Adult tier 2: NSFW starters — deferred to stage system when in affectionate_intent
+        if (
+            _both_of_age
+            and hasattr(datasets, "reddit_nsfw_titles")
+            and datasets.reddit_nsfw_titles
+            and _conv_stage != "affectionate_intent"
+        ):
+            moodlet_hot = False
+            try:
+                moodlets = getattr(sim_a, "moodlets", None)
+                if moodlets is not None:
+                    moodlet_hot = any(
+                        moodlets.has(k)
+                        for k in (
+                            "flirty",
+                            "alluring",
+                            "in_the_mood",
+                            "love_is_in_the_air",
+                        )
+                    )
+            except Exception:
+                moodlet_hot = False
+
+            likes_target = friendship_score >= REL_ACQUAINTANCE or romance_score >= 25
+            flirt_state = (
+                romance_score >= 35
+                or sim_a.emotion.dominant == "desire"
+                or moodlet_hot
+                or "romantic" in sim_a.profile.get("traits", [])
+            )
+
+            if likes_target and flirt_state and random.random() < 0.20:
+                from datasets.adult import sample_reddit_nsfw_title
+
+                seed = sample_reddit_nsfw_title()
+                if seed:
+                    candidates.append(
+                        (
+                            f'[NSFW STARTER]\nSim A opens with a provocative line: "{seed[:220]}"',
+                            1.35 + (romance_score / 220.0),
+                        )
+                    )
 
         # Gap 1: Debate — logic skill-gated (8% when logic >= 3)
         logic_skill = sim_a.skills.levels.get("logic", 0)
@@ -689,6 +1218,8 @@ def choose_interaction(
 
                 if (
                     friendship_score >= REMINISCE_FRIENDSHIP_MIN
+                    and int(getattr(relationship, "shared_memory_count", 0))
+                    >= REMINISCE_MEMORY_MIN
                     and random.random() < 0.10
                 ):
                     template = sample_reminisce_template()
@@ -745,6 +1276,94 @@ def choose_interaction(
             seed = sample_financial_stress_seed(sim_a.simoleons)
             if seed:
                 candidates.append((format_financial_seed(seed), 1.2))
+
+        # Hippocorpus narrative memory — drives "nostalgic" category actions
+        # recalled (positive) at friendship >= 55; retold (fragmented) at deep grief/trauma
+        if (
+            hasattr(datasets, "hippocorpus")
+            and datasets.hippocorpus
+            and friendship_score >= 55
+            and random.random() < 0.09
+        ):
+            try:
+                _grief_active_hc = getattr(sim_a, "grief_stage", -1) >= 0
+                _mode = "retold" if _grief_active_hc else "recalled"
+                _pool = datasets.hippocorpus.get(_mode, [])
+                if not _pool:
+                    _pool = datasets.hippocorpus.get("recalled", [])
+                if _pool:
+                    _entry = random.choice(_pool)
+                    _snippet = str(_entry.get("story", _entry.get("text", "")))[:200]
+                    if _snippet:
+                        candidates.append(
+                            (
+                                f"[MEMORY — {_mode.upper()}]\n"
+                                f'Sim A draws on a vivid memory: "{_snippet}"\n'
+                                f"Adjudicate how Sim A shares or withholds this with Sim B.",
+                                1.7 if friendship_score >= 65 else 1.1,
+                            )
+                        )
+            except Exception:
+                pass
+
+        # CCPE discovery exchange — early preference elicitation (friendship < 35)
+        # Models natural follow-up curiosity rather than monologuing
+        if (
+            hasattr(datasets, "ccpe_turns")
+            and datasets.ccpe_turns
+            and friendship_score < 35
+            and random.random() < 0.12
+        ):
+            try:
+                _turn = random.choice(datasets.ccpe_turns)
+                _q = str(_turn.get("question", ""))[:120]
+                _a = str(_turn.get("answer", ""))[:120]
+                if _q and _a:
+                    candidates.append(
+                        (
+                            f"[DISCOVERY]\n"
+                            f'Sim A asks organically: "{_q}"\n'
+                            f'Expected natural response style: "{_a[:80]}"\n'
+                            f"Keep it curious, not interrogating.",
+                            1.0,
+                        )
+                    )
+            except Exception:
+                pass
+
+        # Health concern seed — when either sim is unwell or low energy
+        if (
+            hasattr(datasets, "health_symptoms")
+            and datasets.health_symptoms
+            and friendship_score >= REL_ACQUAINTANCE
+        ):
+            _either_unwell = (
+                getattr(sim_a, "health_status", "healthy") != "healthy"
+                or getattr(sim_b, "health_status", "healthy") != "healthy"
+                or getattr(sim_a, "_low_energy_ticks", 0) >= 3
+            )
+            if _either_unwell and random.random() < 0.15:
+                try:
+                    from datasets.health import sample_symptom
+
+                    _symptom = sample_symptom(sim_a.needs.energy)
+                    if _symptom:
+                        _who = (
+                            sim_a.name
+                            if getattr(sim_a, "health_status", "healthy") != "healthy"
+                            else sim_b.name
+                        )
+                        candidates.append(
+                            (
+                                f"[HEALTH CONCERN]\n"
+                                f'{_who} describes: "{_symptom["text"][:180]}"\n'
+                                f"Possible cause: {_symptom.get('condition', 'unknown')}. "
+                                f"Adjudicate how Sim A responds given their agreeableness.",
+                                1.4,
+                            )
+                        )
+                except Exception:
+                    pass
 
     # Loneliness seed — FIG-Loneliness (when sim_a is socially isolated)
     if (
@@ -812,6 +1431,7 @@ def choose_interaction(
         and not trait_blocks_interaction(sim_a, action)
         and can_perform_interaction(sim_a, action)
         and action not in _event_blocked
+        and prerequisites_met(sim_a, relationship, action)
     ]
     # Sentiment-unlocked interactions (with boosted weight)
     for unlocked in sentiment_unlocked_interactions(relationship):
@@ -854,12 +1474,73 @@ def choose_interaction(
         sim_a._action_cooldowns.clear()
         return "say hello"
 
+    # ── Interruption routing for urgent states ───────────────────────────────
+    from config import ENABLE_ACTION_INTERRUPTS
+
+    if ENABLE_ACTION_INTERRUPTS:
+        interruption = apply_interruption(
+            {
+                "fire_risk": float(
+                    getattr(sim_a, "hazard_flags", {}).get("fire", 0.0) or 0.0
+                ),
+                "bladder_critical": float(getattr(sim_a.needs, "bladder", 50.0) or 50.0)
+                < 8,
+                "energy_critical": float(getattr(sim_a.needs, "energy", 50.0) or 50.0)
+                < 8,
+            }
+        )
+        if interruption and not sim_a.is_on_cooldown(interruption, current_tick):
+            return interruption
+
+    # System 2b: Stage-aware arc weights (tease → disclosure → affectionate_intent)
+    candidates = _apply_stage_weights(sim_a, sim_b, relationship, candidates, datasets)
+
     # System 1: NLI-based category boosting — emergent routing from Sim state
     candidates = _nli_boost_candidates(sim_a, sim_b, relationship, candidates)
-    candidates = [
-        (action, max(0.01, weight * interaction_weight_modifier(sim_a, action)))
-        for action, weight in candidates
-    ]
+    weighted: list[tuple[str, float]] = []
+    for action, weight in candidates:
+        from config import ACTION_RISK_WEIGHT
+
+        mod = interaction_weight_modifier(sim_a, action)
+        feas = score_action_feasibility(sim_a, action, env)
+        risk = compute_social_risk(sim_a, sim_b, relationship, action)
+        desire_push = float(
+            getattr(sim_a, "_desire_loop", {}).get("romance_push", 0.0) or 0.0
+        )
+        if desire_push > 0 and any(
+            k in action for k in ("flirt", "love", "hands", "date")
+        ):
+            mod *= 1.0 + min(0.35, desire_push)
+        weighted.append(
+            (
+                action,
+                max(0.01, weight * mod * feas * (1.0 - (risk * ACTION_RISK_WEIGHT))),
+            )
+        )
+    candidates = weighted
+    # Neural policy weighting (phase 1 contextual interaction model)
+    try:
+        import engine.engine as _eng_mod
+
+        eng = getattr(_eng_mod, "_current_engine", None)
+        if eng is not None and hasattr(eng, "neural_policy"):
+            goal_text = ""
+            if getattr(sim_a, "active_wants", None):
+                goal_text = max(
+                    sim_a.active_wants, key=lambda w: float(w.priority)
+                ).description
+            feats = eng.neural_policy.extract_features(sim_a, goal_text, "social")
+            candidates = [
+                (
+                    action,
+                    eng.neural_policy.score_interaction(
+                        sim_a, action, float(weight), feats
+                    ),
+                )
+                for action, weight in candidates
+            ]
+    except Exception:
+        pass
     # Adaptive bandit weighting (phase 1 online learning)
     try:
         import engine.engine as _eng_mod
@@ -881,11 +1562,22 @@ def choose_interaction(
 
     actions, weights = zip(*candidates)
     pick = random.choices(actions, weights=weights, k=1)[0]
+    sim_a._action_chain = build_action_chain(sim_a, pick)[1:]
     try:
+        from config import ENABLE_ACTION_EXPLANATIONS
+
+        top = sorted(candidates, key=lambda x: x[1], reverse=True)[:5]
+        top_action, top_weight = top[0]
+        top_feas = score_action_feasibility(sim_a, top_action, env)
+        top_risk = compute_social_risk(sim_a, sim_b, relationship, top_action)
         sim_a._last_autonomy_choice = {
             "selected": pick,
-            "top_candidates": sorted(candidates, key=lambda x: x[1], reverse=True)[:5],
+            "top_candidates": top,
         }
+        if ENABLE_ACTION_EXPLANATIONS:
+            sim_a._last_autonomy_choice["explanation"] = explain_choice(
+                top_action, float(top_weight), top_feas, top_risk, env
+            )
     except Exception:
         pass
     return pick

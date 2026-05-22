@@ -4,7 +4,7 @@ chat.py — Have a conversation with a single generated Sim.
 
 Usage:
     python chat.py
-    python chat.py --backend ollama --no-datasets
+    python chat.py --backend llama-server --no-datasets
 
 Commands during chat:
     /state   — show full sim state (needs, skills, fears)
@@ -234,14 +234,10 @@ def _display_full_state(sim) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Chat with a Sim")
-    parser.add_argument("--backend", default="ollama",
-                        choices=["ollama", "llama-server", "llama-cpp"])
-    parser.add_argument("--ollama-model", default=None)
+    parser.add_argument("--backend", default="llama-server",
+                        choices=["llama-server", "llama-cpp", "mock"])
     parser.add_argument("--no-datasets", action="store_true")
     args = parser.parse_args()
-
-    if args.ollama_model:
-        os.environ["SIM_V2_OLLAMA_MODEL"] = args.ollama_model
 
     # Generate sim
     essays: list[str] = []

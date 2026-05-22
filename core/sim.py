@@ -87,6 +87,20 @@ class Sim:
         self._dialogue_buffer: list[dict] = []  # last N turns with current partner
         self._dialogue_partner: str = ""  # sim_id of current conversation partner
         self._dialogue_last_tick: int = -999
+        self._action_chain: list[str] = []
+        self._desire_loop: dict[str, float] = {
+            "romance_push": 0.0,
+            "social_repair_push": 0.0,
+            "comfort_seek_push": 0.0,
+        }
+        self.sleep_debt: float = 0.0
+        self.social_strain: float = 0.0
+        # System 2b: Conversation escalation arc
+        self._conversation_stage: str = (
+            "small_talk"  # small_talk→teasing→disclosure→affectionate_intent
+        )
+        self._conversation_stage_turns: int = 0  # turns spent in current stage
+        self._consent_state: dict[str, str] = {}  # partner_id → "given"|"withdrawn"|""
         # System 5: Sleep consolidation
         self._last_consolidation_tick: int = -9999
         # Extended life systems
@@ -164,6 +178,8 @@ class Sim:
         )
         # Club memberships (populated by ClubManager)
         self.club_ids: list[str] = []
+        self.dynasty_id: str | None = None
+        self.dynasty_role: str = "member"
         # Coworkers (populated by engine init)
         self.coworker_ids: list[str] = []
         # Unlocked interactions (from milestone rewards)
@@ -177,9 +193,11 @@ class Sim:
         self.autonomy_profile: dict[str, float] = {}
         # Moodlet stack — always present, no engine dependency
         from core.moodlets import MoodletStack
+
         self.moodlets = MoodletStack()
         # Career id mapped from profile job title
         from world.careers import career_from_job_title
+
         if not self.career_id:
             self.career_id = career_from_job_title(profile.get("job", ""))
         self.career_days: int = random.randint(0, 20)
@@ -223,12 +241,23 @@ class Sim:
         return "home"
 
     def economy_tick(self, current_tick: int) -> None:
-        self.simoleons = max(0.0, self.simoleons - LIVING_COST_PER_TICK)
+        eng = getattr(self, "_engine_ref", None)
+        from persistence.ledger import TX_LIVING_COST, TX_SALARY
+        if eng:
+            eng._tx(self, -LIVING_COST_PER_TICK, TX_LIVING_COST,
+                    description="periodic living cost")
+        else:
+            self.simoleons = max(0.0, self.simoleons - LIVING_COST_PER_TICK)
         if current_tick % PAY_PERIOD_TICKS == 0:
             income = BASE_SALARY.get(self.profile["income"], 90) * (
                 self.career_performance / 100
             )
-            self.simoleons += round(income, 2)
+            if eng:
+                eng._tx(self, round(income, 2), TX_SALARY,
+                        counterpart=self.profile.get("job", ""),
+                        description=f"salary ({self.profile.get('job','')})")
+            else:
+                self.simoleons += round(income, 2)
         if self.simoleons < LOW_FUNDS_THRESHOLD:
             self.emotion.add("nervousness", 0.5, duration=5, source="financial stress")
 
@@ -274,6 +303,29 @@ class Sim:
             self._low_energy_ticks += 1
         else:
             self._low_energy_ticks = 0
+
+        self.sleep_debt = max(
+            0.0, min(100.0, self.sleep_debt + max(0.0, 50.0 - self.needs.energy) * 0.02)
+        )
+        self.social_strain = max(
+            0.0,
+            min(100.0, self.social_strain + max(0.0, 45.0 - self.needs.social) * 0.03),
+        )
+        self._desire_loop["romance_push"] = max(
+            0.0,
+            min(
+                1.0,
+                (0.2 if self.emotion.dominant == "desire" else 0.0)
+                + (0.2 if "romantic" in self.profile.get("traits", []) else 0.0)
+                + (0.1 if self.needs.fun < 45 else 0.0),
+            ),
+        )
+        self._desire_loop["social_repair_push"] = max(
+            0.0, min(1.0, self.social_strain / 100.0)
+        )
+        self._desire_loop["comfort_seek_push"] = max(
+            0.0, min(1.0, self.sleep_debt / 100.0)
+        )
 
         self.economy_tick(getattr(self, "_current_tick", 0))
 

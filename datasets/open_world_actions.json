@@ -1,0 +1,5169 @@
+{
+  "source": {
+    "dataset": "OpenGalaxea/Galaxea-Open-World-Dataset",
+    "task_archive_count": 227
+  },
+  "summary": {
+    "normalized_actions": 227,
+    "unique_action_text": 174,
+    "top_verbs": [
+      [
+        "put",
+        21
+      ],
+      [
+        "organize",
+        19
+      ],
+      [
+        "open",
+        16
+      ],
+      [
+        "arrange",
+        13
+      ],
+      [
+        "clean",
+        12
+      ],
+      [
+        "make",
+        8
+      ],
+      [
+        "pick",
+        8
+      ],
+      [
+        "take",
+        7
+      ],
+      [
+        "turn",
+        7
+      ],
+      [
+        "pour",
+        6
+      ],
+      [
+        "plug",
+        5
+      ],
+      [
+        "storage",
+        5
+      ],
+      [
+        "wipe",
+        5
+      ],
+      [
+        "hang",
+        4
+      ],
+      [
+        "replace",
+        4
+      ],
+      [
+        "steam",
+        4
+      ],
+      [
+        "store",
+        4
+      ],
+      [
+        "switch",
+        4
+      ],
+      [
+        "chair",
+        3
+      ],
+      [
+        "desktop",
+        3
+      ]
+    ],
+    "intent_distribution": {
+      "utility": 44,
+      "tidy": 34,
+      "cook": 14,
+      "shopping": 1,
+      "clean": 18,
+      "collect": 1,
+      "repair": 1,
+      "trash": 2,
+      "laundry": 8,
+      "move": 8,
+      "place": 3,
+      "craft": 8,
+      "open_close": 21,
+      "store": 31,
+      "pick_place": 8,
+      "serve": 9,
+      "replace": 4,
+      "retrieve": 10,
+      "social": 1,
+      "dress": 1
+    },
+    "venue_distribution": {
+      "home": 171,
+      "office": 11,
+      "bathroom": 8,
+      "kitchen": 20,
+      "retail_store": 17
+    },
+    "likely_noisy_entries": 4
+  },
+  "actions": [
+    {
+      "action_text": "adjust the air conditioner temperature",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Adjust_The_Air_Conditioner_Temperature_20250711_006.tar.gz"
+      ]
+    },
+    {
+      "action_text": "arrange fruits",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Arrange_Fruits_20250819_011.tar.gz"
+      ]
+    },
+    {
+      "action_text": "arrange mineral water bottles on the desk",
+      "intent": "tidy",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Arrange_Mineral_Water_Bottles_On_The_Desk_20250721_008.tar.gz"
+      ]
+    },
+    {
+      "action_text": "arrange sofa cushions",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Arrange_Sofa_Cushions_20250708_006.tar.gz",
+        "lerobot/Arrange_Sofa_Cushions_20250804_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "arrange the fruits",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Arrange_The_Fruits_20250716_006.tar.gz",
+        "lerobot/Arrange_The_Fruits_20250731_012.tar.gz",
+        "lerobot/Arrange_The_Fruits_20250822_013.tar.gz"
+      ]
+    },
+    {
+      "action_text": "arrange the sofa cushions",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Arrange_The_Sofa_Cushions_20250722_008.tar.gz"
+      ]
+    },
+    {
+      "action_text": "arrange the tray",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Arrange_The_Tray_20250725_010.tar.gz",
+        "lerobot/Arrange_The_Tray_20250804_012.tar.gz",
+        "lerobot/Arrange_The_Tray_20250822_013.tar.gz"
+      ]
+    },
+    {
+      "action_text": "arrange throw pillows on living room sofa",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Arrange_Throw_Pillows_On_Living_Room_Sofa_20250624_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "arrange toiletries",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Arrange_Toiletries_20250731_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "bedside console with switch panel",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Bedside_Console_With_Switch_Panel20250624_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "boil the water",
+      "intent": "cook",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Boil_The_Water_20250714_006.tar.gz",
+        "lerobot/Boil_The_Water_20250801_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "chair push and place",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Chair_Push_And_Place_20250709_006.tar.gz",
+        "lerobot/Chair_Push_And_Place_20250719_008.tar.gz",
+        "lerobot/Chair_Push_And_Place_20250801_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "check out at self-checkout counter",
+      "intent": "shopping",
+      "venue_tag": "home",
+      "sociality": "social",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Check_Out_At_Self-checkout_Counter_20250607_003.tar.gz"
+      ]
+    },
+    {
+      "action_text": "clean cutting board",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Clean_Cutting_Board_20250627_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "clean the chopping board",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Clean_The_Chopping_Board_20250722_008.tar.gz"
+      ]
+    },
+    {
+      "action_text": "clean the cutting board",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Clean_The_Cutting_Board_20250711_006.tar.gz",
+        "lerobot/Clean_The_Cutting_Board_20250804_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "clean the mirror",
+      "intent": "clean",
+      "venue_tag": "bathroom",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Clean_The_Mirror_20250714_006.tar.gz",
+        "lerobot/Clean_The_Mirror_20250731_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "clean the sink",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Clean_The_Sink_20250710_006.tar.gz",
+        "lerobot/Clean_The_Sink_20250721_008.tar.gz",
+        "lerobot/Clean_The_Sink_20250730_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "clean the sofa",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Clean_The_Sofa20250627_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "clean the toilet",
+      "intent": "clean",
+      "venue_tag": "bathroom",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Clean_The_Toilet20250618_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "clean toilet",
+      "intent": "clean",
+      "venue_tag": "bathroom",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Clean_Toilet_20250625_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "clothes into the basket",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Clothes_Into_The_Basket_20250728_010.tar.gz"
+      ]
+    },
+    {
+      "action_text": "collect juice",
+      "intent": "collect",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Collect_Juice_20250621_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "connect router cables",
+      "intent": "repair",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Connect_Router_Cables_20250625_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "cooking food in an air fryer",
+      "intent": "cook",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Cooking_Food_In_An_Air_Fryer_20250719_008.tar.gz",
+        "lerobot/Cooking_Food_In_An_Air_Fryer_20250801_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "desktop garbage decluttering",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Desktop_Garbage_Decluttering_20250712_006.tar.gz"
+      ]
+    },
+    {
+      "action_text": "desktop garbage organizing",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Desktop_Garbage_Organizing20250721_008.tar.gz"
+      ]
+    },
+    {
+      "action_text": "desktop trash disposal",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Desktop_Trash_Disposal_20250729_011.tar.gz"
+      ]
+    },
+    {
+      "action_text": "dispose of garbage in the trash can",
+      "intent": "trash",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Dispose_Of_Garbage_In_The_Trash_Can.tar.gz"
+      ]
+    },
+    {
+      "action_text": "dispose of leftover food",
+      "intent": "trash",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Dispose_Of_Leftover_Food_20250626_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "doll storage",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Doll_Storage_20250731_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "dry clothes in a dryer",
+      "intent": "laundry",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Dry_Clothes_In_A_Dryer_20250619_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "egg placement",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Egg_Placement20250703_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "enter exit door turn on off lights",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Enter_Exit_Door_Turn_On_Off_lights_20250620_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "floor cloth wiping stains",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Floor_cloth_wiping_stains_20250614_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "flowers are inserted into vases",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Flowers_Are_Inserted_Into_Vases_20250725_010.tar.gz"
+      ]
+    },
+    {
+      "action_text": "fold clothes",
+      "intent": "laundry",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Fold_Clothes20250617_001.tar.gz",
+        "lerobot/Fold_Clothes_20250807_011.tar.gz"
+      ]
+    },
+    {
+      "action_text": "from kitchen to bedroom",
+      "intent": "utility",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.7,
+      "sources": [
+        "lerobot/From_Kitchen_To_Bedroom20250703_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "handle plates",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Handle_Plates_20250619_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "handle the wooden barrel lid",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Handle_The_Wooden_Barrel_Lid20250619_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "hang clothes",
+      "intent": "laundry",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Hang_Clothes20250625_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "hang the towel on the shelf",
+      "intent": "laundry",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Hang_The_Towel_On_The_Shelf_20250715_006.tar.gz",
+        "lerobot/Hang_The_Towel_On_The_Shelf_20250722_008.tar.gz",
+        "lerobot/Hang_The_Towel_On_The_Shelf_20250805_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "heat food in microwave oven",
+      "intent": "cook",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Heat_Food_In_Microwave_Oven_20250703_003.tar.gz"
+      ]
+    },
+    {
+      "action_text": "heat food in the microwave",
+      "intent": "cook",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Heat_Food_In_The_Microwave_20250710_006.tar.gz"
+      ]
+    },
+    {
+      "action_text": "insert flowers into a vase",
+      "intent": "place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Insert_Flowers_Into_A_Vase_20250711_006.tar.gz"
+      ]
+    },
+    {
+      "action_text": "iron the clothes",
+      "intent": "laundry",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Iron_The_Clothes_20250728_010.tar.gz"
+      ]
+    },
+    {
+      "action_text": "layered shoe cabinet for placing slippers",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Layered_Shoe_Cabinet_For_Placing_Slippers_20250728_010.tar.gz"
+      ]
+    },
+    {
+      "action_text": "lift the steamer lid",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Lift_The_Steamer_Lid20250618_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "lift up the carpet and wipe the floor",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Lift_up_the_carpet_and_wipe_the_floor_20250625_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "locker torage and retrieval",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Locker_torage_And_Retrieval20250623_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "make breakfast",
+      "intent": "craft",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Make_Breakfast_20250626_002.tar.gz",
+        "lerobot/Make_Breakfast_20250726_010.tar.gz"
+      ]
+    },
+    {
+      "action_text": "make milk powder",
+      "intent": "craft",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Make_Milk_Powder_20250728_010.tar.gz",
+        "lerobot/Make_Milk_Powder_20250731_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "make tea",
+      "intent": "craft",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Make_Tea_20250624_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "make the bed",
+      "intent": "craft",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Make_The_Bed_20250616_001.tar.gz",
+        "lerobot/Make_The_Bed_20250708_006.tar.gz",
+        "lerobot/Make_The_Bed_20250730_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "milk powder preparation",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Milk_Powder_Preparation20250701_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "open and close curtains",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Open_And_Close_Curtains_20250708_006.tar.gz"
+      ]
+    },
+    {
+      "action_text": "open and close microwave oven",
+      "intent": "open_close",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Open_And_Close_Microwave_Oven_20250623_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "open and close nightstand door",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Open_And_Close_Nightstand_Door_20250625_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "open and close nightstand drawer",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Open_And_Close_Nightstand_Drawer_20250624_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "open and close the curtain",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Open_And_Close_The_Curtain_20250728_010.tar.gz",
+        "lerobot/Open_And_Close_The_Curtain_20250804_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "open and close the door",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Open_And_Close_The_Door_20250802_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "open and close the freezer door",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Open_and_close_the_freezer_door_20250620.tar.gz"
+      ]
+    },
+    {
+      "action_text": "open and close the nightstand to place items",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Open_And_Close_The_Nightstand_To_Place_Items_20250802_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "open and close the notebook",
+      "intent": "open_close",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Open_And_Close_The_Notebook20250628_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "open and close the refrigerator drawer to place items",
+      "intent": "open_close",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Open_And_Close_The_Refrigerator_Drawer_To_Place_Items_20250728_010.tar.gz",
+        "lerobot/Open_And_Close_The_Refrigerator_Drawer_To_Place_Items_20250802_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "open close lid stirring",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Open_Close_Lid_Stirring_20250618_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "open or close the cabinet door to place items",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Open_Or_Close_The_Cabinet_Door_To_Place_Items_20250719_008.tar.gz",
+        "lerobot/Open_Or_Close_The_Cabinet_Door_To_Place_Items_20250801_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "open the bedroom door to enter",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Open_The_Bedroom_Door_To_Enter20250701_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "opening or closing refrigerator drawers to store and retrieve items",
+      "intent": "open_close",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Opening_Or_Closing_Refrigerator_Drawers_To_Store_And_Retrieve_Items20250624_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize dried fruit and meat shelves",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Organize_Dried_Fruit_And_Meat_Shelves_20250702_003.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize mineral water bottles on the table",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Organize_Mineral_Water_Bottles_0n_The_Table_20250709_006.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize potato chip shelves",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Organize_Potato_Chip_Shelves_20250701_003.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize refrigerated beverage case",
+      "intent": "tidy",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Organize_Refrigerated_Beverage_Case_20250704_003.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize refrigerated shelf",
+      "intent": "tidy",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Organize_Refrigerated_shelf_20250703_003.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize refrigerator items",
+      "intent": "tidy",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Organize_Refrigerator_Items0250703_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize the beverage cooler",
+      "intent": "tidy",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Organize_The_Beverage_Cooler_20250630_003.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize the bread shelf",
+      "intent": "tidy",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Organize_The_Bread_Shelf_20250630_003.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize the coat rack",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Organize_The_Coat_Rack20250617_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize the condiment shelf",
+      "intent": "tidy",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Organize_The_Condiment_Shelf_20250731_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize the potato chip shelf",
+      "intent": "tidy",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Organize_The_Potato_Chip_Shelf_20250630_003.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize the seasoning shelf",
+      "intent": "tidy",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Organize_The_Seasoning_Shelf_20250620_001.tar.gz",
+        "lerobot/Organize_The_Seasoning_Shelf_20250717_006.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize the signs",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Organize_The_Signs20250618_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize the toiletries",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Organize_The_Toiletries_20250719_008.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize the wall-mounted coat rack",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Organize_The_Wall-mounted_Coat_Rack_20250716_006.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize toys",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Organize_Toys_20250628_002.tar.gz",
+        "lerobot/Organize_Toys_20250716_006.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organize trays",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Organize_trays_20250621_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "organizing desktop trash",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/Organizing_Desktop_Trash_20250630_003.tar.gz"
+      ]
+    },
+    {
+      "action_text": "pack medicines into medicine box",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Pack_Medicines_Into_Medicine_Box_20250707_005.tar.gz"
+      ]
+    },
+    {
+      "action_text": "pen case for storing stationery",
+      "intent": "utility",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.7,
+      "sources": [
+        "lerobot/Pen_Case_For_Storing_Stationery_20250717_006.tar.gz",
+        "lerobot/Pen_Case_For_Storing_Stationery_20250719_008.tar.gz",
+        "lerobot/Pen_Case_For_Storing_Stationery_20250802_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "pick and place ice cream freezer",
+      "intent": "pick_place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Pick_And_place_Ice_Cream_Freezer.tar.gz"
+      ]
+    },
+    {
+      "action_text": "pick and place items on the bread shelf",
+      "intent": "pick_place",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Pick_And_Place_Items_On_The_Bread_Shelf_20250701_003.tar.gz"
+      ]
+    },
+    {
+      "action_text": "pick and place items on the potato chip shelves",
+      "intent": "pick_place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Pick_And_Place_Items_On_The_Potato_Chip_Shelves_20250701_003.tar.gz"
+      ]
+    },
+    {
+      "action_text": "pick up garbage on the ground",
+      "intent": "pick_place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Pick_Up_Garbage_On_The_Ground_20250724_010.tar.gz",
+        "lerobot/Pick_Up_Garbage_On_The_Ground_20250801_012.tar.gz",
+        "lerobot/Pick_Up_Garbage_On_The_Ground_20250805_011.tar.gz"
+      ]
+    },
+    {
+      "action_text": "pick up or put down the clip",
+      "intent": "pick_place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Pick_Up_Or_Put_Down_The_Clip20250619.tar.gz"
+      ]
+    },
+    {
+      "action_text": "pick up trash from ground",
+      "intent": "pick_place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Pick_Up_Trash_From_Ground_20250709_006.tar.gz"
+      ]
+    },
+    {
+      "action_text": "place slippers in the layered shoe cabinet",
+      "intent": "place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Place_Slippers_In_The_Layered_Shoe_Cabinet_20250805_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "place the dress shirt on the hanger",
+      "intent": "place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Place_The_Dress_Shirt_On_The_Hanger20250619_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "plug and unplug switch lights",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Plug_And_Unplug_Switch_Lights_20250726_010.tar.gz",
+        "lerobot/Plug_And_Unplug_Switch_Lights_20250802_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "plug into a fixed socket",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Plug_Into_A_Fixed_Socket_20250710_006.tar.gz",
+        "lerobot/Plug_Into_A_Fixed_Socket_20250722_008.tar.gz"
+      ]
+    },
+    {
+      "action_text": "plug the socket",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Plug_The_Socket_20250616_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "pour leftovers",
+      "intent": "serve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Pour_Leftovers_20250802_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "pour out the leftover food",
+      "intent": "serve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Pour_Out_The_Leftover_Food_20250714_006.tar.gz"
+      ]
+    },
+    {
+      "action_text": "pour the leftover food",
+      "intent": "serve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Pour_The_Leftover_Food_20250724_010.tar.gz"
+      ]
+    },
+    {
+      "action_text": "pour water",
+      "intent": "serve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Pour_Water20250708_006.tar.gz",
+        "lerobot/Pour_Water_20250801_012.tar.gz",
+        "lerobot/Pour_Water_20250806_011.tar.gz"
+      ]
+    },
+    {
+      "action_text": "pourwater",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/PourWater_20250614.tar.gz"
+      ]
+    },
+    {
+      "action_text": "pull out the cap",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Pull_Out_The_Cap_20250725_010.tar.gz"
+      ]
+    },
+    {
+      "action_text": "push and pull the chair",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Push_And_Pull_The_Chair_20250728_010.tar.gz"
+      ]
+    },
+    {
+      "action_text": "push in chairs",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Push_In_Chairs_20250614_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "pushing garbage trucks to put garbage away",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Pushing_Garbage_Trucks_To_Put_Garbage_Away20250707_005.tar.gz"
+      ]
+    },
+    {
+      "action_text": "put a bag in the trash can",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Put_A_Bag_In_The_Trash_Can20250617_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "put clothes into the basket",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Put_Clothes_Into_The_Basket_20250709_006.tar.gz",
+        "lerobot/Put_Clothes_Into_The_Basket_20250731_012.tar.gz",
+        "lerobot/Put_Clothes_Into_The_Basket_20250813_011.tar.gz"
+      ]
+    },
+    {
+      "action_text": "put clothes into wardrobe",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Put_Clothes_Into_Wardrobe_20250707_005.tar.gz"
+      ]
+    },
+    {
+      "action_text": "put shoes into the shoe box",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Put_Shoes_Into_The_Shoe_Box_20250801_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "put slippers into floor standing shoe cabinet",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Put_Slippers_Into_Floor_Standing_Shoe_Cabinet_20250620_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "put the flowers in the vase",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Put_The_Flowers_In_The_Vase20250618_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "put the glasses in the glasses case",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Put_The_Glasses_In_The_Glasses_Case_20250722_008.tar.gz",
+        "lerobot/Put_The_Glasses_In_The_Glasses_Case_20250731_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "put the items into the storage box",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Put_The_Items_Into_The_Storage_Box_20250929_002_007.tar.gz"
+      ]
+    },
+    {
+      "action_text": "put the landline phone back in place",
+      "intent": "store",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Put_The_Landline_Phone_Back_In_Place_20250725_010.tar.gz"
+      ]
+    },
+    {
+      "action_text": "put the pen into the pen holder",
+      "intent": "store",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Put_The_Pen_Into_The_Pen_Holder_20250722_008.tar.gz",
+        "lerobot/Put_The_Pen_Into_The_Pen_Holder_20250724_010.tar.gz",
+        "lerobot/Put_The_Pen_Into_The_Pen_Holder_20250731_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "put the phone back in place",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Put_The_Phone_Back_In_place_20250716_006.tar.gz"
+      ]
+    },
+    {
+      "action_text": "put the pillow on the bed",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Put_The_Pillow_On_The_Bed20250617_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "put the shoes into the shoe box",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Put_The_Shoes_Into_The_Shoe_Box_202507116_006.tar.gz",
+        "lerobot/Put_the_shoes_into_the_shoe_box_20250621_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "put the shoes into the shoebox",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Put_The_Shoes_Into_The_Shoebox_20250725_010.tar.gz"
+      ]
+    },
+    {
+      "action_text": "put the trash bag at the door",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Put_The_Trash_Bag_At_The_Door20250626_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "replace the toilet paper roll",
+      "intent": "replace",
+      "venue_tag": "bathroom",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Replace_The_Toilet_Paper_Roll_20250712_006.tar.gz",
+        "lerobot/Replace_The_Toilet_Paper_Roll_20250805_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "replace the toiletries",
+      "intent": "replace",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Replace_The_Toiletries_20250616_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "replace toilet paper",
+      "intent": "replace",
+      "venue_tag": "bathroom",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Replace_Toilet_Paper_20250623_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "replacefacialtissue",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/ReplaceFacialTissue_20250613_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "retrieving and placing items inside the tv cabinet",
+      "intent": "retrieve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Retrieving_And_Placing_Items_Inside_The_TV_Cabinet_20250726_010.tar.gz",
+        "lerobot/Retrieving_And_Placing_Items_Inside_The_TV_Cabinet_20250805_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "returnclothestobasket",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "sources": [
+        "lerobot/ReturnClothesToBasket_20250613_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "ring the landline",
+      "intent": "social",
+      "venue_tag": "office",
+      "sociality": "social",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Ring_The_Landline20250627_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "serve soup in the rice pot",
+      "intent": "serve",
+      "venue_tag": "kitchen",
+      "sociality": "social",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Serve_Soup_In_The_Rice_Pot_20250717_006.tar.gz"
+      ]
+    },
+    {
+      "action_text": "serve soup with a rice pot",
+      "intent": "serve",
+      "venue_tag": "kitchen",
+      "sociality": "social",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Serve_Soup_With_A_Rice_Pot_20250801_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "sliding bar stool",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Sliding_Bar_Stool_20250625_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "sort out desktop garbage",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Sort_Out_Desktop_Garbage20250802_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "steam rice",
+      "intent": "cook",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Steam_Rice_20250711_006.tar.gz",
+        "lerobot/Steam_Rice_20250721_008.tar.gz",
+        "lerobot/Steam_Rice_20250729_010.tar.gz",
+        "lerobot/Steam_Rice_20250730_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "stir-fry",
+      "intent": "cook",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Stir-fry_20250722_008.tar.gz"
+      ]
+    },
+    {
+      "action_text": "stir-fry dishes",
+      "intent": "cook",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Stir-Fry_Dishes_20250726_010.tar.gz"
+      ]
+    },
+    {
+      "action_text": "stir-frying",
+      "intent": "cook",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Stir-frying_20250627_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "storage tools",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Storage_Tools_20250722_008.tar.gz",
+        "lerobot/Storage_Tools_20250725_010.tar.gz",
+        "lerobot/Storage_Tools_20250802_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "storage towels",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Storage_Towels_20250715_006.tar.gz",
+        "lerobot/Storage_Towels_20250721_008.tar.gz"
+      ]
+    },
+    {
+      "action_text": "store dolls",
+      "intent": "store",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Store_Dolls_20250812_011.tar.gz"
+      ]
+    },
+    {
+      "action_text": "store fruit",
+      "intent": "store",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Store_Fruit_20250811_011.tar.gz"
+      ]
+    },
+    {
+      "action_text": "store tableware",
+      "intent": "store",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Store_Tableware_20250625_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "store the dolls",
+      "intent": "store",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Store_The_Dolls_20250719_008.tar.gz"
+      ]
+    },
+    {
+      "action_text": "switch the fan on and off",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Switch_The_Fan_On_And_Off_20250725_010.tar.gz",
+        "lerobot/Switch_The_Fan_On_And_Off_20250804_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "switch the rotating nightstand and place items",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Switch_The_Rotating_Nightstand_And_Place_Items_20250804_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "switch the sign",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Switch_The_Sign_20250616_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "take a bowl from the cabinet",
+      "intent": "retrieve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Take_a_bowl_from_the_cabinet_20250620_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "take a drink out of fridge and put it on table",
+      "intent": "retrieve",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Take_A_Drink_Out_Of_Fridge_And_Put_It_On_Table_20250712_006.tar.gz"
+      ]
+    },
+    {
+      "action_text": "take and place tableware",
+      "intent": "retrieve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Take_and_place_tableware_20250620_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "take and place the portable power bank",
+      "intent": "retrieve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Take_And_Place_The_Portable_Power_Bank20250628_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "take and put items in and out of the microwave oven",
+      "intent": "retrieve",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Take_And_Put_Items_In_And_Out_Of_The_Microwave_Oven_20250731_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "take drinks from the refrigerator and place them on the table",
+      "intent": "retrieve",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Take_Drinks_From_The_Refrigerator_And_Place_Them_On_The_Table_20250728_010.tar.gz"
+      ]
+    },
+    {
+      "action_text": "take out the laundry from the washing machine",
+      "intent": "retrieve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Take_Out_The_Laundry_From_The_Washing_Machine20250618_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "taking and placing shoes in the shoe cabinet",
+      "intent": "retrieve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Taking_And_Placing_Shoes_In_The_Shoe_Cabinet20250624_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "tidy up bathroom toiletries",
+      "intent": "tidy",
+      "venue_tag": "bathroom",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Tidy_Up_Bathroom_Toiletries_20250623_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "toast bread",
+      "intent": "cook",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Toast_Bread_20250618_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "turn on and off central air conditioning system",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Turn_On_And_Off_Central_Air_Conditioning_System_20250623_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "turn on and off central air conditioning system 002 special",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.75,
+      "sources": [
+        "lerobot/Turn_On_And_Off_Central_Air_Conditioning_System_20250624_002_special.tar.gz"
+      ]
+    },
+    {
+      "action_text": "turn on and off the air conditioner",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Turn_On_And_Off_The_Air_Conditioner_20250802_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "turn on and off the small fan",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Turn_On_And_Off_The_Small_Fan_20250711_006.tar.gz"
+      ]
+    },
+    {
+      "action_text": "turn on and turn off the air conditioner",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Turn_On_And_Turn_Off_The_Air_Conditioner_20250724_010.tar.gz"
+      ]
+    },
+    {
+      "action_text": "turn on off the light",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Turn_On_Off_The_Light_20250619_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "turn on the food pot",
+      "intent": "utility",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Turn_0n_The_Food_Pot20250618_001.tar.gz"
+      ]
+    },
+    {
+      "action_text": "twist the bottle cap",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Twist_The_Bottle_Cap20250619_001.tar.gz",
+        "lerobot/Twist_The_Bottle_Cap_20250725_010.tar.gz",
+        "lerobot/Twist_The_Bottle_Cap_20250731_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "uncap the pen",
+      "intent": "open_close",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Uncap_The_Pen_20250804_012.tar.gz"
+      ]
+    },
+    {
+      "action_text": "use of objects",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Use_Of_Objects_20250704_003.tar.gz"
+      ]
+    },
+    {
+      "action_text": "use the drawer to store the hair dryer",
+      "intent": "utility",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "sources": [
+        "lerobot/Use_The_Drawer_To_Store_The_Hair_Dryer20250625_002.tar.gz"
+      ]
+    },
+    {
+      "action_text": "washing machine washes clothes",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Washing_Machine_Washes_Clothes_20250728_010.tar.gz"
+      ]
+    },
+    {
+      "action_text": "water dispenser connected to water",
+      "intent": "serve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Water_Dispenser_Connected_To_Water20250707_005.tar.gz"
+      ]
+    },
+    {
+      "action_text": "wearing a strip rack hanging clothes for retrieval",
+      "intent": "dress",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Wearing_A_Strip_Rack_Hanging_Clothes_For_Retrieval_20250724_010.tar.gz"
+      ]
+    },
+    {
+      "action_text": "wipe the desktop",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Wipe_The_Desktop_20250801_012.tar.gz",
+        "lerobot/Wipe_The_Desktop_20250804_011.tar.gz"
+      ]
+    },
+    {
+      "action_text": "wipe the sewage stains with a ground cloth",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "sources": [
+        "lerobot/Wipe_The_Sewage_Stains_With_A_Ground_Cloth_20250709_006.tar.gz",
+        "lerobot/Wipe_The_Sewage_Stains_With_A_Ground_Cloth_20250725_010.tar.gz",
+        "lerobot/Wipe_The_Sewage_Stains_With_A_Ground_Cloth_20250801_012.tar.gz"
+      ]
+    }
+  ],
+  "normalized_records": [
+    {
+      "source_archive": "lerobot/Adjust_The_Air_Conditioner_Temperature_20250711_006.tar.gz",
+      "canonical_task": "Adjust_The_Air_Conditioner_Temperature",
+      "action_text": "adjust the air conditioner temperature",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "adjust",
+        "air",
+        "conditioner",
+        "temperature"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Arrange_Fruits_20250819_011.tar.gz",
+      "canonical_task": "Arrange_Fruits",
+      "action_text": "arrange fruits",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "arrange",
+        "fruits"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Arrange_Mineral_Water_Bottles_On_The_Desk_20250721_008.tar.gz",
+      "canonical_task": "Arrange_Mineral_Water_Bottles_On_The_Desk",
+      "action_text": "arrange mineral water bottles on the desk",
+      "intent": "tidy",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "arrange",
+        "bottles",
+        "desk",
+        "mineral",
+        "water"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Arrange_Sofa_Cushions_20250708_006.tar.gz",
+      "canonical_task": "Arrange_Sofa_Cushions",
+      "action_text": "arrange sofa cushions",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "arrange",
+        "cushions",
+        "sofa"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Arrange_Sofa_Cushions_20250804_012.tar.gz",
+      "canonical_task": "Arrange_Sofa_Cushions",
+      "action_text": "arrange sofa cushions",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "arrange",
+        "cushions",
+        "sofa"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Arrange_The_Fruits_20250716_006.tar.gz",
+      "canonical_task": "Arrange_The_Fruits",
+      "action_text": "arrange the fruits",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "arrange",
+        "fruits"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Arrange_The_Fruits_20250731_012.tar.gz",
+      "canonical_task": "Arrange_The_Fruits",
+      "action_text": "arrange the fruits",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "arrange",
+        "fruits"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Arrange_The_Fruits_20250822_013.tar.gz",
+      "canonical_task": "Arrange_The_Fruits",
+      "action_text": "arrange the fruits",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "arrange",
+        "fruits"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Arrange_The_Sofa_Cushions_20250722_008.tar.gz",
+      "canonical_task": "Arrange_The_Sofa_Cushions",
+      "action_text": "arrange the sofa cushions",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "arrange",
+        "cushions",
+        "sofa"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Arrange_The_Tray_20250725_010.tar.gz",
+      "canonical_task": "Arrange_The_Tray",
+      "action_text": "arrange the tray",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "arrange",
+        "tray"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Arrange_The_Tray_20250804_012.tar.gz",
+      "canonical_task": "Arrange_The_Tray",
+      "action_text": "arrange the tray",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "arrange",
+        "tray"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Arrange_The_Tray_20250822_013.tar.gz",
+      "canonical_task": "Arrange_The_Tray",
+      "action_text": "arrange the tray",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "arrange",
+        "tray"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Arrange_Throw_Pillows_On_Living_Room_Sofa_20250624_002.tar.gz",
+      "canonical_task": "Arrange_Throw_Pillows_On_Living_Room_Sofa",
+      "action_text": "arrange throw pillows on living room sofa",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "arrange",
+        "living",
+        "pillows",
+        "room",
+        "sofa",
+        "throw"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Arrange_Toiletries_20250731_012.tar.gz",
+      "canonical_task": "Arrange_Toiletries",
+      "action_text": "arrange toiletries",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "arrange",
+        "toiletries"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Bedside_Console_With_Switch_Panel20250624_002.tar.gz",
+      "canonical_task": "Bedside_Console_With_Switch_Panel",
+      "action_text": "bedside console with switch panel",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "bedside",
+        "console",
+        "panel",
+        "switch"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Boil_The_Water_20250714_006.tar.gz",
+      "canonical_task": "Boil_The_Water",
+      "action_text": "boil the water",
+      "intent": "cook",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "boil",
+        "water"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Boil_The_Water_20250801_012.tar.gz",
+      "canonical_task": "Boil_The_Water",
+      "action_text": "boil the water",
+      "intent": "cook",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "boil",
+        "water"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Chair_Push_And_Place_20250709_006.tar.gz",
+      "canonical_task": "Chair_Push_And_Place",
+      "action_text": "chair push and place",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "chair",
+        "place",
+        "push"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Chair_Push_And_Place_20250719_008.tar.gz",
+      "canonical_task": "Chair_Push_And_Place",
+      "action_text": "chair push and place",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "chair",
+        "place",
+        "push"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Chair_Push_And_Place_20250801_012.tar.gz",
+      "canonical_task": "Chair_Push_And_Place",
+      "action_text": "chair push and place",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "chair",
+        "place",
+        "push"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Check_Out_At_Self-checkout_Counter_20250607_003.tar.gz",
+      "canonical_task": "Check_Out_At_Self-checkout_Counter",
+      "action_text": "check out at self-checkout counter",
+      "intent": "shopping",
+      "venue_tag": "home",
+      "sociality": "social",
+      "confidence": 0.8,
+      "tokens": [
+        "check",
+        "counter",
+        "self-checkout"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Clean_Cutting_Board_20250627_002.tar.gz",
+      "canonical_task": "Clean_Cutting_Board",
+      "action_text": "clean cutting board",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "board",
+        "clean",
+        "cutting"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Clean_The_Chopping_Board_20250722_008.tar.gz",
+      "canonical_task": "Clean_The_Chopping_Board",
+      "action_text": "clean the chopping board",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "board",
+        "chopping",
+        "clean"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Clean_The_Cutting_Board_20250711_006.tar.gz",
+      "canonical_task": "Clean_The_Cutting_Board",
+      "action_text": "clean the cutting board",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "board",
+        "clean",
+        "cutting"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Clean_The_Cutting_Board_20250804_012.tar.gz",
+      "canonical_task": "Clean_The_Cutting_Board",
+      "action_text": "clean the cutting board",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "board",
+        "clean",
+        "cutting"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Clean_The_Mirror_20250714_006.tar.gz",
+      "canonical_task": "Clean_The_Mirror",
+      "action_text": "clean the mirror",
+      "intent": "clean",
+      "venue_tag": "bathroom",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "clean",
+        "mirror"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Clean_The_Mirror_20250731_012.tar.gz",
+      "canonical_task": "Clean_The_Mirror",
+      "action_text": "clean the mirror",
+      "intent": "clean",
+      "venue_tag": "bathroom",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "clean",
+        "mirror"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Clean_The_Sink_20250710_006.tar.gz",
+      "canonical_task": "Clean_The_Sink",
+      "action_text": "clean the sink",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "clean",
+        "sink"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Clean_The_Sink_20250721_008.tar.gz",
+      "canonical_task": "Clean_The_Sink",
+      "action_text": "clean the sink",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "clean",
+        "sink"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Clean_The_Sink_20250730_012.tar.gz",
+      "canonical_task": "Clean_The_Sink",
+      "action_text": "clean the sink",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "clean",
+        "sink"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Clean_The_Sofa20250627_002.tar.gz",
+      "canonical_task": "Clean_The_Sofa",
+      "action_text": "clean the sofa",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "clean",
+        "sofa"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Clean_The_Toilet20250618_001.tar.gz",
+      "canonical_task": "Clean_The_Toilet",
+      "action_text": "clean the toilet",
+      "intent": "clean",
+      "venue_tag": "bathroom",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "clean",
+        "toilet"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Clean_Toilet_20250625_002.tar.gz",
+      "canonical_task": "Clean_Toilet",
+      "action_text": "clean toilet",
+      "intent": "clean",
+      "venue_tag": "bathroom",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "clean",
+        "toilet"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Clothes_Into_The_Basket_20250728_010.tar.gz",
+      "canonical_task": "Clothes_Into_The_Basket",
+      "action_text": "clothes into the basket",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "basket",
+        "clothes",
+        "into"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Collect_Juice_20250621_001.tar.gz",
+      "canonical_task": "Collect_Juice",
+      "action_text": "collect juice",
+      "intent": "collect",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "collect",
+        "juice"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Connect_Router_Cables_20250625_002.tar.gz",
+      "canonical_task": "Connect_Router_Cables",
+      "action_text": "connect router cables",
+      "intent": "repair",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "cables",
+        "connect",
+        "router"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Cooking_Food_In_An_Air_Fryer_20250719_008.tar.gz",
+      "canonical_task": "Cooking_Food_In_An_Air_Fryer",
+      "action_text": "cooking food in an air fryer",
+      "intent": "cook",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "air",
+        "cooking",
+        "food",
+        "fryer"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Cooking_Food_In_An_Air_Fryer_20250801_012.tar.gz",
+      "canonical_task": "Cooking_Food_In_An_Air_Fryer",
+      "action_text": "cooking food in an air fryer",
+      "intent": "cook",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "air",
+        "cooking",
+        "food",
+        "fryer"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Desktop_Garbage_Decluttering_20250712_006.tar.gz",
+      "canonical_task": "Desktop_Garbage_Decluttering",
+      "action_text": "desktop garbage decluttering",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "decluttering",
+        "desktop",
+        "garbage"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Desktop_Garbage_Organizing20250721_008.tar.gz",
+      "canonical_task": "Desktop_Garbage_Organizing",
+      "action_text": "desktop garbage organizing",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "desktop",
+        "garbage",
+        "organizing"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Desktop_Trash_Disposal_20250729_011.tar.gz",
+      "canonical_task": "Desktop_Trash_Disposal",
+      "action_text": "desktop trash disposal",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "desktop",
+        "disposal",
+        "trash"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Dispose_Of_Garbage_In_The_Trash_Can.tar.gz",
+      "canonical_task": "Dispose_Of_Garbage_In_The_Trash_Can",
+      "action_text": "dispose of garbage in the trash can",
+      "intent": "trash",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "can",
+        "dispose",
+        "garbage",
+        "trash"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Dispose_Of_Leftover_Food_20250626_002.tar.gz",
+      "canonical_task": "Dispose_Of_Leftover_Food",
+      "action_text": "dispose of leftover food",
+      "intent": "trash",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "dispose",
+        "food",
+        "leftover"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Doll_Storage_20250731_012.tar.gz",
+      "canonical_task": "Doll_Storage",
+      "action_text": "doll storage",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "doll",
+        "storage"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Dry_Clothes_In_A_Dryer_20250619_001.tar.gz",
+      "canonical_task": "Dry_Clothes_In_A_Dryer",
+      "action_text": "dry clothes in a dryer",
+      "intent": "laundry",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "clothes",
+        "dry",
+        "dryer"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Egg_Placement20250703_002.tar.gz",
+      "canonical_task": "Egg_Placement",
+      "action_text": "egg placement",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "egg",
+        "placement"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Enter_Exit_Door_Turn_On_Off_lights_20250620_001.tar.gz",
+      "canonical_task": "Enter_Exit_Door_Turn_On_Off_lights",
+      "action_text": "enter exit door turn on off lights",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "door",
+        "enter",
+        "exit",
+        "lights",
+        "off",
+        "turn"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Floor_cloth_wiping_stains_20250614_001.tar.gz",
+      "canonical_task": "Floor_cloth_wiping_stains",
+      "action_text": "floor cloth wiping stains",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "cloth",
+        "floor",
+        "stains",
+        "wiping"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Flowers_Are_Inserted_Into_Vases_20250725_010.tar.gz",
+      "canonical_task": "Flowers_Are_Inserted_Into_Vases",
+      "action_text": "flowers are inserted into vases",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "are",
+        "flowers",
+        "inserted",
+        "into",
+        "vases"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Fold_Clothes20250617_001.tar.gz",
+      "canonical_task": "Fold_Clothes",
+      "action_text": "fold clothes",
+      "intent": "laundry",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "clothes",
+        "fold"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Fold_Clothes_20250807_011.tar.gz",
+      "canonical_task": "Fold_Clothes",
+      "action_text": "fold clothes",
+      "intent": "laundry",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "clothes",
+        "fold"
+      ]
+    },
+    {
+      "source_archive": "lerobot/From_Kitchen_To_Bedroom20250703_002.tar.gz",
+      "canonical_task": "From_Kitchen_To_Bedroom",
+      "action_text": "from kitchen to bedroom",
+      "intent": "utility",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.7,
+      "tokens": [
+        "bedroom",
+        "kitchen"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Handle_Plates_20250619_001.tar.gz",
+      "canonical_task": "Handle_Plates",
+      "action_text": "handle plates",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "handle",
+        "plates"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Handle_The_Wooden_Barrel_Lid20250619_001.tar.gz",
+      "canonical_task": "Handle_The_Wooden_Barrel_Lid",
+      "action_text": "handle the wooden barrel lid",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "barrel",
+        "handle",
+        "lid",
+        "wooden"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Hang_Clothes20250625_002.tar.gz",
+      "canonical_task": "Hang_Clothes",
+      "action_text": "hang clothes",
+      "intent": "laundry",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "clothes",
+        "hang"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Hang_The_Towel_On_The_Shelf_20250715_006.tar.gz",
+      "canonical_task": "Hang_The_Towel_On_The_Shelf",
+      "action_text": "hang the towel on the shelf",
+      "intent": "laundry",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "hang",
+        "shelf",
+        "towel"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Hang_The_Towel_On_The_Shelf_20250722_008.tar.gz",
+      "canonical_task": "Hang_The_Towel_On_The_Shelf",
+      "action_text": "hang the towel on the shelf",
+      "intent": "laundry",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "hang",
+        "shelf",
+        "towel"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Hang_The_Towel_On_The_Shelf_20250805_012.tar.gz",
+      "canonical_task": "Hang_The_Towel_On_The_Shelf",
+      "action_text": "hang the towel on the shelf",
+      "intent": "laundry",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "hang",
+        "shelf",
+        "towel"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Heat_Food_In_Microwave_Oven_20250703_003.tar.gz",
+      "canonical_task": "Heat_Food_In_Microwave_Oven",
+      "action_text": "heat food in microwave oven",
+      "intent": "cook",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "food",
+        "heat",
+        "microwave",
+        "oven"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Heat_Food_In_The_Microwave_20250710_006.tar.gz",
+      "canonical_task": "Heat_Food_In_The_Microwave",
+      "action_text": "heat food in the microwave",
+      "intent": "cook",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "food",
+        "heat",
+        "microwave"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Insert_Flowers_Into_A_Vase_20250711_006.tar.gz",
+      "canonical_task": "Insert_Flowers_Into_A_Vase",
+      "action_text": "insert flowers into a vase",
+      "intent": "place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "flowers",
+        "insert",
+        "into",
+        "vase"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Iron_The_Clothes_20250728_010.tar.gz",
+      "canonical_task": "Iron_The_Clothes",
+      "action_text": "iron the clothes",
+      "intent": "laundry",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "clothes",
+        "iron"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Layered_Shoe_Cabinet_For_Placing_Slippers_20250728_010.tar.gz",
+      "canonical_task": "Layered_Shoe_Cabinet_For_Placing_Slippers",
+      "action_text": "layered shoe cabinet for placing slippers",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "cabinet",
+        "layered",
+        "placing",
+        "shoe",
+        "slippers"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Lift_The_Steamer_Lid20250618_001.tar.gz",
+      "canonical_task": "Lift_The_Steamer_Lid",
+      "action_text": "lift the steamer lid",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "lid",
+        "lift",
+        "steamer"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Lift_up_the_carpet_and_wipe_the_floor_20250625_002.tar.gz",
+      "canonical_task": "Lift_up_the_carpet_and_wipe_the_floor",
+      "action_text": "lift up the carpet and wipe the floor",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "carpet",
+        "floor",
+        "lift",
+        "wipe"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Locker_torage_And_Retrieval20250623_002.tar.gz",
+      "canonical_task": "Locker_torage_And_Retrieval",
+      "action_text": "locker torage and retrieval",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "locker",
+        "retrieval",
+        "torage"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Make_Breakfast_20250626_002.tar.gz",
+      "canonical_task": "Make_Breakfast",
+      "action_text": "make breakfast",
+      "intent": "craft",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "breakfast",
+        "make"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Make_Breakfast_20250726_010.tar.gz",
+      "canonical_task": "Make_Breakfast",
+      "action_text": "make breakfast",
+      "intent": "craft",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "breakfast",
+        "make"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Make_Milk_Powder_20250728_010.tar.gz",
+      "canonical_task": "Make_Milk_Powder",
+      "action_text": "make milk powder",
+      "intent": "craft",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "make",
+        "milk",
+        "powder"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Make_Milk_Powder_20250731_012.tar.gz",
+      "canonical_task": "Make_Milk_Powder",
+      "action_text": "make milk powder",
+      "intent": "craft",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "make",
+        "milk",
+        "powder"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Make_Tea_20250624_002.tar.gz",
+      "canonical_task": "Make_Tea",
+      "action_text": "make tea",
+      "intent": "craft",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "make",
+        "tea"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Make_The_Bed_20250616_001.tar.gz",
+      "canonical_task": "Make_The_Bed",
+      "action_text": "make the bed",
+      "intent": "craft",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "bed",
+        "make"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Make_The_Bed_20250708_006.tar.gz",
+      "canonical_task": "Make_The_Bed",
+      "action_text": "make the bed",
+      "intent": "craft",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "bed",
+        "make"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Make_The_Bed_20250730_012.tar.gz",
+      "canonical_task": "Make_The_Bed",
+      "action_text": "make the bed",
+      "intent": "craft",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "bed",
+        "make"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Milk_Powder_Preparation20250701_002.tar.gz",
+      "canonical_task": "Milk_Powder_Preparation",
+      "action_text": "milk powder preparation",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "milk",
+        "powder",
+        "preparation"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_And_Close_Curtains_20250708_006.tar.gz",
+      "canonical_task": "Open_And_Close_Curtains",
+      "action_text": "open and close curtains",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "close",
+        "curtains",
+        "open"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_And_Close_Microwave_Oven_20250623_002.tar.gz",
+      "canonical_task": "Open_And_Close_Microwave_Oven",
+      "action_text": "open and close microwave oven",
+      "intent": "open_close",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "close",
+        "microwave",
+        "open",
+        "oven"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_And_Close_Nightstand_Door_20250625_002.tar.gz",
+      "canonical_task": "Open_And_Close_Nightstand_Door",
+      "action_text": "open and close nightstand door",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "close",
+        "door",
+        "nightstand",
+        "open"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_And_Close_Nightstand_Drawer_20250624_002.tar.gz",
+      "canonical_task": "Open_And_Close_Nightstand_Drawer",
+      "action_text": "open and close nightstand drawer",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "close",
+        "drawer",
+        "nightstand",
+        "open"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_And_Close_The_Curtain_20250728_010.tar.gz",
+      "canonical_task": "Open_And_Close_The_Curtain",
+      "action_text": "open and close the curtain",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "close",
+        "curtain",
+        "open"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_And_Close_The_Curtain_20250804_012.tar.gz",
+      "canonical_task": "Open_And_Close_The_Curtain",
+      "action_text": "open and close the curtain",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "close",
+        "curtain",
+        "open"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_And_Close_The_Door_20250802_012.tar.gz",
+      "canonical_task": "Open_And_Close_The_Door",
+      "action_text": "open and close the door",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "close",
+        "door",
+        "open"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_And_Close_The_Nightstand_To_Place_Items_20250802_012.tar.gz",
+      "canonical_task": "Open_And_Close_The_Nightstand_To_Place_Items",
+      "action_text": "open and close the nightstand to place items",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "close",
+        "items",
+        "nightstand",
+        "open",
+        "place"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_And_Close_The_Notebook20250628_002.tar.gz",
+      "canonical_task": "Open_And_Close_The_Notebook",
+      "action_text": "open and close the notebook",
+      "intent": "open_close",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "close",
+        "notebook",
+        "open"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_And_Close_The_Refrigerator_Drawer_To_Place_Items_20250728_010.tar.gz",
+      "canonical_task": "Open_And_Close_The_Refrigerator_Drawer_To_Place_Items",
+      "action_text": "open and close the refrigerator drawer to place items",
+      "intent": "open_close",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "close",
+        "drawer",
+        "items",
+        "open",
+        "place",
+        "refrigerator"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_And_Close_The_Refrigerator_Drawer_To_Place_Items_20250802_012.tar.gz",
+      "canonical_task": "Open_And_Close_The_Refrigerator_Drawer_To_Place_Items",
+      "action_text": "open and close the refrigerator drawer to place items",
+      "intent": "open_close",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "close",
+        "drawer",
+        "items",
+        "open",
+        "place",
+        "refrigerator"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_Close_Lid_Stirring_20250618_001.tar.gz",
+      "canonical_task": "Open_Close_Lid_Stirring",
+      "action_text": "open close lid stirring",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "close",
+        "lid",
+        "open",
+        "stirring"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_Or_Close_The_Cabinet_Door_To_Place_Items_20250719_008.tar.gz",
+      "canonical_task": "Open_Or_Close_The_Cabinet_Door_To_Place_Items",
+      "action_text": "open or close the cabinet door to place items",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "cabinet",
+        "close",
+        "door",
+        "items",
+        "open",
+        "place"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_Or_Close_The_Cabinet_Door_To_Place_Items_20250801_012.tar.gz",
+      "canonical_task": "Open_Or_Close_The_Cabinet_Door_To_Place_Items",
+      "action_text": "open or close the cabinet door to place items",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "cabinet",
+        "close",
+        "door",
+        "items",
+        "open",
+        "place"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_The_Bedroom_Door_To_Enter20250701_002.tar.gz",
+      "canonical_task": "Open_The_Bedroom_Door_To_Enter",
+      "action_text": "open the bedroom door to enter",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "bedroom",
+        "door",
+        "enter",
+        "open"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Open_and_close_the_freezer_door_20250620.tar.gz",
+      "canonical_task": "Open_and_close_the_freezer_door",
+      "action_text": "open and close the freezer door",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "close",
+        "door",
+        "freezer",
+        "open"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Opening_Or_Closing_Refrigerator_Drawers_To_Store_And_Retrieve_Items20250624_002.tar.gz",
+      "canonical_task": "Opening_Or_Closing_Refrigerator_Drawers_To_Store_And_Retrieve_Items",
+      "action_text": "opening or closing refrigerator drawers to store and retrieve items",
+      "intent": "open_close",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "closing",
+        "drawers",
+        "items",
+        "opening",
+        "refrigerator",
+        "retrieve",
+        "store"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_Dried_Fruit_And_Meat_Shelves_20250702_003.tar.gz",
+      "canonical_task": "Organize_Dried_Fruit_And_Meat_Shelves",
+      "action_text": "organize dried fruit and meat shelves",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "dried",
+        "fruit",
+        "meat",
+        "organize",
+        "shelves"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_Mineral_Water_Bottles_0n_The_Table_20250709_006.tar.gz",
+      "canonical_task": "Organize_Mineral_Water_Bottles_On_The_Table",
+      "action_text": "organize mineral water bottles on the table",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "bottles",
+        "mineral",
+        "organize",
+        "table",
+        "water"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_Potato_Chip_Shelves_20250701_003.tar.gz",
+      "canonical_task": "Organize_Potato_Chip_Shelves",
+      "action_text": "organize potato chip shelves",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "chip",
+        "organize",
+        "potato",
+        "shelves"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_Refrigerated_Beverage_Case_20250704_003.tar.gz",
+      "canonical_task": "Organize_Refrigerated_Beverage_Case",
+      "action_text": "organize refrigerated beverage case",
+      "intent": "tidy",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "beverage",
+        "case",
+        "organize",
+        "refrigerated"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_Refrigerated_shelf_20250703_003.tar.gz",
+      "canonical_task": "Organize_Refrigerated_shelf",
+      "action_text": "organize refrigerated shelf",
+      "intent": "tidy",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "organize",
+        "refrigerated",
+        "shelf"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_Refrigerator_Items0250703_002.tar.gz",
+      "canonical_task": "Organize_Refrigerator_Items",
+      "action_text": "organize refrigerator items",
+      "intent": "tidy",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "items",
+        "organize",
+        "refrigerator"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_The_Beverage_Cooler_20250630_003.tar.gz",
+      "canonical_task": "Organize_The_Beverage_Cooler",
+      "action_text": "organize the beverage cooler",
+      "intent": "tidy",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "beverage",
+        "cooler",
+        "organize"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_The_Bread_Shelf_20250630_003.tar.gz",
+      "canonical_task": "Organize_The_Bread_Shelf",
+      "action_text": "organize the bread shelf",
+      "intent": "tidy",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "bread",
+        "organize",
+        "shelf"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_The_Coat_Rack20250617_001.tar.gz",
+      "canonical_task": "Organize_The_Coat_Rack",
+      "action_text": "organize the coat rack",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "coat",
+        "organize",
+        "rack"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_The_Condiment_Shelf_20250731_012.tar.gz",
+      "canonical_task": "Organize_The_Condiment_Shelf",
+      "action_text": "organize the condiment shelf",
+      "intent": "tidy",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "condiment",
+        "organize",
+        "shelf"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_The_Potato_Chip_Shelf_20250630_003.tar.gz",
+      "canonical_task": "Organize_The_Potato_Chip_Shelf",
+      "action_text": "organize the potato chip shelf",
+      "intent": "tidy",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "chip",
+        "organize",
+        "potato",
+        "shelf"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_The_Seasoning_Shelf_20250620_001.tar.gz",
+      "canonical_task": "Organize_The_Seasoning_Shelf",
+      "action_text": "organize the seasoning shelf",
+      "intent": "tidy",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "organize",
+        "seasoning",
+        "shelf"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_The_Seasoning_Shelf_20250717_006.tar.gz",
+      "canonical_task": "Organize_The_Seasoning_Shelf",
+      "action_text": "organize the seasoning shelf",
+      "intent": "tidy",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "organize",
+        "seasoning",
+        "shelf"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_The_Signs20250618_001.tar.gz",
+      "canonical_task": "Organize_The_Signs",
+      "action_text": "organize the signs",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "organize",
+        "signs"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_The_Toiletries_20250719_008.tar.gz",
+      "canonical_task": "Organize_The_Toiletries",
+      "action_text": "organize the toiletries",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "organize",
+        "toiletries"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_The_Wall-mounted_Coat_Rack_20250716_006.tar.gz",
+      "canonical_task": "Organize_The_Wall-mounted_Coat_Rack",
+      "action_text": "organize the wall-mounted coat rack",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "coat",
+        "organize",
+        "rack",
+        "wall-mounted"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_Toys_20250628_002.tar.gz",
+      "canonical_task": "Organize_Toys",
+      "action_text": "organize toys",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "organize",
+        "toys"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_Toys_20250716_006.tar.gz",
+      "canonical_task": "Organize_Toys",
+      "action_text": "organize toys",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "organize",
+        "toys"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organize_trays_20250621_001.tar.gz",
+      "canonical_task": "Organize_trays",
+      "action_text": "organize trays",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "organize",
+        "trays"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Organizing_Desktop_Trash_20250630_003.tar.gz",
+      "canonical_task": "Organizing_Desktop_Trash",
+      "action_text": "organizing desktop trash",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "desktop",
+        "organizing",
+        "trash"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pack_Medicines_Into_Medicine_Box_20250707_005.tar.gz",
+      "canonical_task": "Pack_Medicines_Into_Medicine_Box",
+      "action_text": "pack medicines into medicine box",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "box",
+        "into",
+        "medicine",
+        "medicines",
+        "pack"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pen_Case_For_Storing_Stationery_20250717_006.tar.gz",
+      "canonical_task": "Pen_Case_For_Storing_Stationery",
+      "action_text": "pen case for storing stationery",
+      "intent": "utility",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.7,
+      "tokens": [
+        "case",
+        "pen",
+        "stationery",
+        "storing"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pen_Case_For_Storing_Stationery_20250719_008.tar.gz",
+      "canonical_task": "Pen_Case_For_Storing_Stationery",
+      "action_text": "pen case for storing stationery",
+      "intent": "utility",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.7,
+      "tokens": [
+        "case",
+        "pen",
+        "stationery",
+        "storing"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pen_Case_For_Storing_Stationery_20250802_012.tar.gz",
+      "canonical_task": "Pen_Case_For_Storing_Stationery",
+      "action_text": "pen case for storing stationery",
+      "intent": "utility",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.7,
+      "tokens": [
+        "case",
+        "pen",
+        "stationery",
+        "storing"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pick_And_Place_Items_On_The_Bread_Shelf_20250701_003.tar.gz",
+      "canonical_task": "Pick_And_Place_Items_On_The_Bread_Shelf",
+      "action_text": "pick and place items on the bread shelf",
+      "intent": "pick_place",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "bread",
+        "items",
+        "pick",
+        "place",
+        "shelf"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pick_And_Place_Items_On_The_Potato_Chip_Shelves_20250701_003.tar.gz",
+      "canonical_task": "Pick_And_Place_Items_On_The_Potato_Chip_Shelves",
+      "action_text": "pick and place items on the potato chip shelves",
+      "intent": "pick_place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "chip",
+        "items",
+        "pick",
+        "place",
+        "potato",
+        "shelves"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pick_And_place_Ice_Cream_Freezer.tar.gz",
+      "canonical_task": "Pick_And_place_Ice_Cream_Freezer",
+      "action_text": "pick and place ice cream freezer",
+      "intent": "pick_place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "cream",
+        "freezer",
+        "ice",
+        "pick",
+        "place"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pick_Up_Garbage_On_The_Ground_20250724_010.tar.gz",
+      "canonical_task": "Pick_Up_Garbage_On_The_Ground",
+      "action_text": "pick up garbage on the ground",
+      "intent": "pick_place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "garbage",
+        "ground",
+        "pick"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pick_Up_Garbage_On_The_Ground_20250801_012.tar.gz",
+      "canonical_task": "Pick_Up_Garbage_On_The_Ground",
+      "action_text": "pick up garbage on the ground",
+      "intent": "pick_place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "garbage",
+        "ground",
+        "pick"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pick_Up_Garbage_On_The_Ground_20250805_011.tar.gz",
+      "canonical_task": "Pick_Up_Garbage_On_The_Ground",
+      "action_text": "pick up garbage on the ground",
+      "intent": "pick_place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "garbage",
+        "ground",
+        "pick"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pick_Up_Or_Put_Down_The_Clip20250619.tar.gz",
+      "canonical_task": "Pick_Up_Or_Put_Down_The_Clip",
+      "action_text": "pick up or put down the clip",
+      "intent": "pick_place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "clip",
+        "down",
+        "pick",
+        "put"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pick_Up_Trash_From_Ground_20250709_006.tar.gz",
+      "canonical_task": "Pick_Up_Trash_From_Ground",
+      "action_text": "pick up trash from ground",
+      "intent": "pick_place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "ground",
+        "pick",
+        "trash"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Place_Slippers_In_The_Layered_Shoe_Cabinet_20250805_012.tar.gz",
+      "canonical_task": "Place_Slippers_In_The_Layered_Shoe_Cabinet",
+      "action_text": "place slippers in the layered shoe cabinet",
+      "intent": "place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "cabinet",
+        "layered",
+        "place",
+        "shoe",
+        "slippers"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Place_The_Dress_Shirt_On_The_Hanger20250619_001.tar.gz",
+      "canonical_task": "Place_The_Dress_Shirt_On_The_Hanger",
+      "action_text": "place the dress shirt on the hanger",
+      "intent": "place",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "dress",
+        "hanger",
+        "place",
+        "shirt"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Plug_And_Unplug_Switch_Lights_20250726_010.tar.gz",
+      "canonical_task": "Plug_And_Unplug_Switch_Lights",
+      "action_text": "plug and unplug switch lights",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "lights",
+        "plug",
+        "switch",
+        "unplug"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Plug_And_Unplug_Switch_Lights_20250802_012.tar.gz",
+      "canonical_task": "Plug_And_Unplug_Switch_Lights",
+      "action_text": "plug and unplug switch lights",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "lights",
+        "plug",
+        "switch",
+        "unplug"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Plug_Into_A_Fixed_Socket_20250710_006.tar.gz",
+      "canonical_task": "Plug_Into_A_Fixed_Socket",
+      "action_text": "plug into a fixed socket",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "fixed",
+        "into",
+        "plug",
+        "socket"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Plug_Into_A_Fixed_Socket_20250722_008.tar.gz",
+      "canonical_task": "Plug_Into_A_Fixed_Socket",
+      "action_text": "plug into a fixed socket",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "fixed",
+        "into",
+        "plug",
+        "socket"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Plug_The_Socket_20250616_001.tar.gz",
+      "canonical_task": "Plug_The_Socket",
+      "action_text": "plug the socket",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "plug",
+        "socket"
+      ]
+    },
+    {
+      "source_archive": "lerobot/PourWater_20250614.tar.gz",
+      "canonical_task": "PourWater",
+      "action_text": "pourwater",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "pourwater"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pour_Leftovers_20250802_012.tar.gz",
+      "canonical_task": "Pour_Leftovers",
+      "action_text": "pour leftovers",
+      "intent": "serve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "leftovers",
+        "pour"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pour_Out_The_Leftover_Food_20250714_006.tar.gz",
+      "canonical_task": "Pour_Out_The_Leftover_Food",
+      "action_text": "pour out the leftover food",
+      "intent": "serve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "food",
+        "leftover",
+        "pour"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pour_The_Leftover_Food_20250724_010.tar.gz",
+      "canonical_task": "Pour_The_Leftover_Food",
+      "action_text": "pour the leftover food",
+      "intent": "serve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "food",
+        "leftover",
+        "pour"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pour_Water20250708_006.tar.gz",
+      "canonical_task": "Pour_Water",
+      "action_text": "pour water",
+      "intent": "serve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "pour",
+        "water"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pour_Water_20250801_012.tar.gz",
+      "canonical_task": "Pour_Water",
+      "action_text": "pour water",
+      "intent": "serve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "pour",
+        "water"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pour_Water_20250806_011.tar.gz",
+      "canonical_task": "Pour_Water",
+      "action_text": "pour water",
+      "intent": "serve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "pour",
+        "water"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pull_Out_The_Cap_20250725_010.tar.gz",
+      "canonical_task": "Pull_Out_The_Cap",
+      "action_text": "pull out the cap",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "cap",
+        "pull"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Push_And_Pull_The_Chair_20250728_010.tar.gz",
+      "canonical_task": "Push_And_Pull_The_Chair",
+      "action_text": "push and pull the chair",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "chair",
+        "pull",
+        "push"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Push_In_Chairs_20250614_001.tar.gz",
+      "canonical_task": "Push_In_Chairs",
+      "action_text": "push in chairs",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "chairs",
+        "push"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Pushing_Garbage_Trucks_To_Put_Garbage_Away20250707_005.tar.gz",
+      "canonical_task": "Pushing_Garbage_Trucks_To_Put_Garbage_Away",
+      "action_text": "pushing garbage trucks to put garbage away",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "away",
+        "garbage",
+        "pushing",
+        "put",
+        "trucks"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_A_Bag_In_The_Trash_Can20250617_001.tar.gz",
+      "canonical_task": "Put_A_Bag_In_The_Trash_Can",
+      "action_text": "put a bag in the trash can",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "bag",
+        "can",
+        "put",
+        "trash"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_Clothes_Into_The_Basket_20250709_006.tar.gz",
+      "canonical_task": "Put_Clothes_Into_The_Basket",
+      "action_text": "put clothes into the basket",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "basket",
+        "clothes",
+        "into",
+        "put"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_Clothes_Into_The_Basket_20250731_012.tar.gz",
+      "canonical_task": "Put_Clothes_Into_The_Basket",
+      "action_text": "put clothes into the basket",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "basket",
+        "clothes",
+        "into",
+        "put"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_Clothes_Into_The_Basket_20250813_011.tar.gz",
+      "canonical_task": "Put_Clothes_Into_The_Basket",
+      "action_text": "put clothes into the basket",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "basket",
+        "clothes",
+        "into",
+        "put"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_Clothes_Into_Wardrobe_20250707_005.tar.gz",
+      "canonical_task": "Put_Clothes_Into_Wardrobe",
+      "action_text": "put clothes into wardrobe",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "clothes",
+        "into",
+        "put",
+        "wardrobe"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_Shoes_Into_The_Shoe_Box_20250801_012.tar.gz",
+      "canonical_task": "Put_Shoes_Into_The_Shoe_Box",
+      "action_text": "put shoes into the shoe box",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "box",
+        "into",
+        "put",
+        "shoe",
+        "shoes"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_Slippers_Into_Floor_Standing_Shoe_Cabinet_20250620_001.tar.gz",
+      "canonical_task": "Put_Slippers_Into_Floor_Standing_Shoe_Cabinet",
+      "action_text": "put slippers into floor standing shoe cabinet",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "cabinet",
+        "floor",
+        "into",
+        "put",
+        "shoe",
+        "slippers",
+        "standing"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_The_Flowers_In_The_Vase20250618_001.tar.gz",
+      "canonical_task": "Put_The_Flowers_In_The_Vase",
+      "action_text": "put the flowers in the vase",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "flowers",
+        "put",
+        "vase"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_The_Glasses_In_The_Glasses_Case_20250722_008.tar.gz",
+      "canonical_task": "Put_The_Glasses_In_The_Glasses_Case",
+      "action_text": "put the glasses in the glasses case",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "case",
+        "glasses",
+        "put"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_The_Glasses_In_The_Glasses_Case_20250731_012.tar.gz",
+      "canonical_task": "Put_The_Glasses_In_The_Glasses_Case",
+      "action_text": "put the glasses in the glasses case",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "case",
+        "glasses",
+        "put"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_The_Items_Into_The_Storage_Box_20250929_002_007.tar.gz",
+      "canonical_task": "Put_The_Items_Into_The_Storage_Box",
+      "action_text": "put the items into the storage box",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "box",
+        "into",
+        "items",
+        "put",
+        "storage"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_The_Landline_Phone_Back_In_Place_20250725_010.tar.gz",
+      "canonical_task": "Put_The_Landline_Phone_Back_In_Place",
+      "action_text": "put the landline phone back in place",
+      "intent": "store",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "back",
+        "landline",
+        "phone",
+        "place",
+        "put"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_The_Pen_Into_The_Pen_Holder_20250722_008.tar.gz",
+      "canonical_task": "Put_The_Pen_Into_The_Pen_Holder",
+      "action_text": "put the pen into the pen holder",
+      "intent": "store",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "holder",
+        "into",
+        "pen",
+        "put"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_The_Pen_Into_The_Pen_Holder_20250724_010.tar.gz",
+      "canonical_task": "Put_The_Pen_Into_The_Pen_Holder",
+      "action_text": "put the pen into the pen holder",
+      "intent": "store",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "holder",
+        "into",
+        "pen",
+        "put"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_The_Pen_Into_The_Pen_Holder_20250731_012.tar.gz",
+      "canonical_task": "Put_The_Pen_Into_The_Pen_Holder",
+      "action_text": "put the pen into the pen holder",
+      "intent": "store",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "holder",
+        "into",
+        "pen",
+        "put"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_The_Phone_Back_In_place_20250716_006.tar.gz",
+      "canonical_task": "Put_The_Phone_Back_In_place",
+      "action_text": "put the phone back in place",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "back",
+        "phone",
+        "place",
+        "put"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_The_Pillow_On_The_Bed20250617_001.tar.gz",
+      "canonical_task": "Put_The_Pillow_On_The_Bed",
+      "action_text": "put the pillow on the bed",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "bed",
+        "pillow",
+        "put"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_The_Shoes_Into_The_Shoe_Box_202507116_006.tar.gz",
+      "canonical_task": "Put_The_Shoes_Into_The_Shoe_Box",
+      "action_text": "put the shoes into the shoe box",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "box",
+        "into",
+        "put",
+        "shoe",
+        "shoes"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_The_Shoes_Into_The_Shoebox_20250725_010.tar.gz",
+      "canonical_task": "Put_The_Shoes_Into_The_Shoebox",
+      "action_text": "put the shoes into the shoebox",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "into",
+        "put",
+        "shoebox",
+        "shoes"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_The_Trash_Bag_At_The_Door20250626_002.tar.gz",
+      "canonical_task": "Put_The_Trash_Bag_At_The_Door",
+      "action_text": "put the trash bag at the door",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "bag",
+        "door",
+        "put",
+        "trash"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Put_the_shoes_into_the_shoe_box_20250621_001.tar.gz",
+      "canonical_task": "Put_the_shoes_into_the_shoe_box",
+      "action_text": "put the shoes into the shoe box",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "box",
+        "into",
+        "put",
+        "shoe",
+        "shoes"
+      ]
+    },
+    {
+      "source_archive": "lerobot/ReplaceFacialTissue_20250613_001.tar.gz",
+      "canonical_task": "ReplaceFacialTissue",
+      "action_text": "replacefacialtissue",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "replacefacialtissue"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Replace_The_Toilet_Paper_Roll_20250712_006.tar.gz",
+      "canonical_task": "Replace_The_Toilet_Paper_Roll",
+      "action_text": "replace the toilet paper roll",
+      "intent": "replace",
+      "venue_tag": "bathroom",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "paper",
+        "replace",
+        "roll",
+        "toilet"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Replace_The_Toilet_Paper_Roll_20250805_012.tar.gz",
+      "canonical_task": "Replace_The_Toilet_Paper_Roll",
+      "action_text": "replace the toilet paper roll",
+      "intent": "replace",
+      "venue_tag": "bathroom",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "paper",
+        "replace",
+        "roll",
+        "toilet"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Replace_The_Toiletries_20250616_001.tar.gz",
+      "canonical_task": "Replace_The_Toiletries",
+      "action_text": "replace the toiletries",
+      "intent": "replace",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "replace",
+        "toiletries"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Replace_Toilet_Paper_20250623_002.tar.gz",
+      "canonical_task": "Replace_Toilet_Paper",
+      "action_text": "replace toilet paper",
+      "intent": "replace",
+      "venue_tag": "bathroom",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "paper",
+        "replace",
+        "toilet"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Retrieving_And_Placing_Items_Inside_The_TV_Cabinet_20250726_010.tar.gz",
+      "canonical_task": "Retrieving_And_Placing_Items_Inside_The_TV_Cabinet",
+      "action_text": "retrieving and placing items inside the tv cabinet",
+      "intent": "retrieve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "cabinet",
+        "inside",
+        "items",
+        "placing",
+        "retrieving",
+        "tv"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Retrieving_And_Placing_Items_Inside_The_TV_Cabinet_20250805_012.tar.gz",
+      "canonical_task": "Retrieving_And_Placing_Items_Inside_The_TV_Cabinet",
+      "action_text": "retrieving and placing items inside the tv cabinet",
+      "intent": "retrieve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "cabinet",
+        "inside",
+        "items",
+        "placing",
+        "retrieving",
+        "tv"
+      ]
+    },
+    {
+      "source_archive": "lerobot/ReturnClothesToBasket_20250613_001.tar.gz",
+      "canonical_task": "ReturnClothesToBasket",
+      "action_text": "returnclothestobasket",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.6,
+      "tokens": [
+        "returnclothestobasket"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Ring_The_Landline20250627_002.tar.gz",
+      "canonical_task": "Ring_The_Landline",
+      "action_text": "ring the landline",
+      "intent": "social",
+      "venue_tag": "office",
+      "sociality": "social",
+      "confidence": 0.9,
+      "tokens": [
+        "landline",
+        "ring"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Serve_Soup_In_The_Rice_Pot_20250717_006.tar.gz",
+      "canonical_task": "Serve_Soup_In_The_Rice_Pot",
+      "action_text": "serve soup in the rice pot",
+      "intent": "serve",
+      "venue_tag": "kitchen",
+      "sociality": "social",
+      "confidence": 0.9,
+      "tokens": [
+        "pot",
+        "rice",
+        "serve",
+        "soup"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Serve_Soup_With_A_Rice_Pot_20250801_012.tar.gz",
+      "canonical_task": "Serve_Soup_With_A_Rice_Pot",
+      "action_text": "serve soup with a rice pot",
+      "intent": "serve",
+      "venue_tag": "kitchen",
+      "sociality": "social",
+      "confidence": 0.9,
+      "tokens": [
+        "pot",
+        "rice",
+        "serve",
+        "soup"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Sliding_Bar_Stool_20250625_002.tar.gz",
+      "canonical_task": "Sliding_Bar_Stool",
+      "action_text": "sliding bar stool",
+      "intent": "move",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "bar",
+        "sliding",
+        "stool"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Sort_Out_Desktop_Garbage20250802_012.tar.gz",
+      "canonical_task": "Sort_Out_Desktop_Garbage",
+      "action_text": "sort out desktop garbage",
+      "intent": "tidy",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "desktop",
+        "garbage",
+        "sort"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Steam_Rice_20250711_006.tar.gz",
+      "canonical_task": "Steam_Rice",
+      "action_text": "steam rice",
+      "intent": "cook",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "rice",
+        "steam"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Steam_Rice_20250721_008.tar.gz",
+      "canonical_task": "Steam_Rice",
+      "action_text": "steam rice",
+      "intent": "cook",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "rice",
+        "steam"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Steam_Rice_20250729_010.tar.gz",
+      "canonical_task": "Steam_Rice",
+      "action_text": "steam rice",
+      "intent": "cook",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "rice",
+        "steam"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Steam_Rice_20250730_012.tar.gz",
+      "canonical_task": "Steam_Rice",
+      "action_text": "steam rice",
+      "intent": "cook",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "rice",
+        "steam"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Stir-Fry_Dishes_20250726_010.tar.gz",
+      "canonical_task": "Stir-Fry_Dishes",
+      "action_text": "stir-fry dishes",
+      "intent": "cook",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "dishes",
+        "stir-fry"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Stir-fry_20250722_008.tar.gz",
+      "canonical_task": "Stir-fry",
+      "action_text": "stir-fry",
+      "intent": "cook",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "stir-fry"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Stir-frying_20250627_002.tar.gz",
+      "canonical_task": "Stir-frying",
+      "action_text": "stir-frying",
+      "intent": "cook",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "stir-frying"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Storage_Tools_20250722_008.tar.gz",
+      "canonical_task": "Storage_Tools",
+      "action_text": "storage tools",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "storage",
+        "tools"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Storage_Tools_20250725_010.tar.gz",
+      "canonical_task": "Storage_Tools",
+      "action_text": "storage tools",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "storage",
+        "tools"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Storage_Tools_20250802_012.tar.gz",
+      "canonical_task": "Storage_Tools",
+      "action_text": "storage tools",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "storage",
+        "tools"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Storage_Towels_20250715_006.tar.gz",
+      "canonical_task": "Storage_Towels",
+      "action_text": "storage towels",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "storage",
+        "towels"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Storage_Towels_20250721_008.tar.gz",
+      "canonical_task": "Storage_Towels",
+      "action_text": "storage towels",
+      "intent": "store",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "storage",
+        "towels"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Store_Dolls_20250812_011.tar.gz",
+      "canonical_task": "Store_Dolls",
+      "action_text": "store dolls",
+      "intent": "store",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "dolls",
+        "store"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Store_Fruit_20250811_011.tar.gz",
+      "canonical_task": "Store_Fruit",
+      "action_text": "store fruit",
+      "intent": "store",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "fruit",
+        "store"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Store_Tableware_20250625_002.tar.gz",
+      "canonical_task": "Store_Tableware",
+      "action_text": "store tableware",
+      "intent": "store",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "store",
+        "tableware"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Store_The_Dolls_20250719_008.tar.gz",
+      "canonical_task": "Store_The_Dolls",
+      "action_text": "store the dolls",
+      "intent": "store",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "dolls",
+        "store"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Switch_The_Fan_On_And_Off_20250725_010.tar.gz",
+      "canonical_task": "Switch_The_Fan_On_And_Off",
+      "action_text": "switch the fan on and off",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "fan",
+        "off",
+        "switch"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Switch_The_Fan_On_And_Off_20250804_012.tar.gz",
+      "canonical_task": "Switch_The_Fan_On_And_Off",
+      "action_text": "switch the fan on and off",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "fan",
+        "off",
+        "switch"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Switch_The_Rotating_Nightstand_And_Place_Items_20250804_012.tar.gz",
+      "canonical_task": "Switch_The_Rotating_Nightstand_And_Place_Items",
+      "action_text": "switch the rotating nightstand and place items",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "items",
+        "nightstand",
+        "place",
+        "rotating",
+        "switch"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Switch_The_Sign_20250616_001.tar.gz",
+      "canonical_task": "Switch_The_Sign",
+      "action_text": "switch the sign",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "sign",
+        "switch"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Take_A_Drink_Out_Of_Fridge_And_Put_It_On_Table_20250712_006.tar.gz",
+      "canonical_task": "Take_A_Drink_Out_Of_Fridge_And_Put_It_On_Table",
+      "action_text": "take a drink out of fridge and put it on table",
+      "intent": "retrieve",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "drink",
+        "fridge",
+        "it",
+        "put",
+        "table",
+        "take"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Take_And_Place_The_Portable_Power_Bank20250628_002.tar.gz",
+      "canonical_task": "Take_And_Place_The_Portable_Power_Bank",
+      "action_text": "take and place the portable power bank",
+      "intent": "retrieve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "bank",
+        "place",
+        "portable",
+        "power",
+        "take"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Take_And_Put_Items_In_And_Out_Of_The_Microwave_Oven_20250731_012.tar.gz",
+      "canonical_task": "Take_And_Put_Items_In_And_Out_Of_The_Microwave_Oven",
+      "action_text": "take and put items in and out of the microwave oven",
+      "intent": "retrieve",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "items",
+        "microwave",
+        "oven",
+        "put",
+        "take"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Take_Drinks_From_The_Refrigerator_And_Place_Them_On_The_Table_20250728_010.tar.gz",
+      "canonical_task": "Take_Drinks_From_The_Refrigerator_And_Place_Them_On_The_Table",
+      "action_text": "take drinks from the refrigerator and place them on the table",
+      "intent": "retrieve",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "drinks",
+        "place",
+        "refrigerator",
+        "table",
+        "take",
+        "them"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Take_Out_The_Laundry_From_The_Washing_Machine20250618_001.tar.gz",
+      "canonical_task": "Take_Out_The_Laundry_From_The_Washing_Machine",
+      "action_text": "take out the laundry from the washing machine",
+      "intent": "retrieve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "laundry",
+        "machine",
+        "take",
+        "washing"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Take_a_bowl_from_the_cabinet_20250620_001.tar.gz",
+      "canonical_task": "Take_a_bowl_from_the_cabinet",
+      "action_text": "take a bowl from the cabinet",
+      "intent": "retrieve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "bowl",
+        "cabinet",
+        "take"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Take_and_place_tableware_20250620_001.tar.gz",
+      "canonical_task": "Take_and_place_tableware",
+      "action_text": "take and place tableware",
+      "intent": "retrieve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "place",
+        "tableware",
+        "take"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Taking_And_Placing_Shoes_In_The_Shoe_Cabinet20250624_002.tar.gz",
+      "canonical_task": "Taking_And_Placing_Shoes_In_The_Shoe_Cabinet",
+      "action_text": "taking and placing shoes in the shoe cabinet",
+      "intent": "retrieve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "cabinet",
+        "placing",
+        "shoe",
+        "shoes",
+        "taking"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Tidy_Up_Bathroom_Toiletries_20250623_002.tar.gz",
+      "canonical_task": "Tidy_Up_Bathroom_Toiletries",
+      "action_text": "tidy up bathroom toiletries",
+      "intent": "tidy",
+      "venue_tag": "bathroom",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "bathroom",
+        "tidy",
+        "toiletries"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Toast_Bread_20250618_001.tar.gz",
+      "canonical_task": "Toast_Bread",
+      "action_text": "toast bread",
+      "intent": "cook",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "bread",
+        "toast"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Turn_0n_The_Food_Pot20250618_001.tar.gz",
+      "canonical_task": "Turn_On_The_Food_Pot",
+      "action_text": "turn on the food pot",
+      "intent": "utility",
+      "venue_tag": "kitchen",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "food",
+        "pot",
+        "turn"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Turn_On_And_Off_Central_Air_Conditioning_System_20250623_002.tar.gz",
+      "canonical_task": "Turn_On_And_Off_Central_Air_Conditioning_System",
+      "action_text": "turn on and off central air conditioning system",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "air",
+        "central",
+        "conditioning",
+        "off",
+        "system",
+        "turn"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Turn_On_And_Off_Central_Air_Conditioning_System_20250624_002_special.tar.gz",
+      "canonical_task": "Turn_On_And_Off_Central_Air_Conditioning_System_002_special",
+      "action_text": "turn on and off central air conditioning system 002 special",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.75,
+      "tokens": [
+        "002",
+        "air",
+        "central",
+        "conditioning",
+        "off",
+        "special",
+        "system",
+        "turn"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Turn_On_And_Off_The_Air_Conditioner_20250802_012.tar.gz",
+      "canonical_task": "Turn_On_And_Off_The_Air_Conditioner",
+      "action_text": "turn on and off the air conditioner",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "air",
+        "conditioner",
+        "off",
+        "turn"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Turn_On_And_Off_The_Small_Fan_20250711_006.tar.gz",
+      "canonical_task": "Turn_On_And_Off_The_Small_Fan",
+      "action_text": "turn on and off the small fan",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "fan",
+        "off",
+        "small",
+        "turn"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Turn_On_And_Turn_Off_The_Air_Conditioner_20250724_010.tar.gz",
+      "canonical_task": "Turn_On_And_Turn_Off_The_Air_Conditioner",
+      "action_text": "turn on and turn off the air conditioner",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "air",
+        "conditioner",
+        "off",
+        "turn"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Turn_On_Off_The_Light_20250619_001.tar.gz",
+      "canonical_task": "Turn_On_Off_The_Light",
+      "action_text": "turn on off the light",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "light",
+        "off",
+        "turn"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Twist_The_Bottle_Cap20250619_001.tar.gz",
+      "canonical_task": "Twist_The_Bottle_Cap",
+      "action_text": "twist the bottle cap",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "bottle",
+        "cap",
+        "twist"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Twist_The_Bottle_Cap_20250725_010.tar.gz",
+      "canonical_task": "Twist_The_Bottle_Cap",
+      "action_text": "twist the bottle cap",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "bottle",
+        "cap",
+        "twist"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Twist_The_Bottle_Cap_20250731_012.tar.gz",
+      "canonical_task": "Twist_The_Bottle_Cap",
+      "action_text": "twist the bottle cap",
+      "intent": "open_close",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "bottle",
+        "cap",
+        "twist"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Uncap_The_Pen_20250804_012.tar.gz",
+      "canonical_task": "Uncap_The_Pen",
+      "action_text": "uncap the pen",
+      "intent": "open_close",
+      "venue_tag": "office",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "pen",
+        "uncap"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Use_Of_Objects_20250704_003.tar.gz",
+      "canonical_task": "Use_Of_Objects",
+      "action_text": "use of objects",
+      "intent": "utility",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "objects",
+        "use"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Use_The_Drawer_To_Store_The_Hair_Dryer20250625_002.tar.gz",
+      "canonical_task": "Use_The_Drawer_To_Store_The_Hair_Dryer",
+      "action_text": "use the drawer to store the hair dryer",
+      "intent": "utility",
+      "venue_tag": "retail_store",
+      "sociality": "solo",
+      "confidence": 0.9,
+      "tokens": [
+        "drawer",
+        "dryer",
+        "hair",
+        "store",
+        "use"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Washing_Machine_Washes_Clothes_20250728_010.tar.gz",
+      "canonical_task": "Washing_Machine_Washes_Clothes",
+      "action_text": "washing machine washes clothes",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "clothes",
+        "machine",
+        "washes",
+        "washing"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Water_Dispenser_Connected_To_Water20250707_005.tar.gz",
+      "canonical_task": "Water_Dispenser_Connected_To_Water",
+      "action_text": "water dispenser connected to water",
+      "intent": "serve",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "connected",
+        "dispenser",
+        "water"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Wearing_A_Strip_Rack_Hanging_Clothes_For_Retrieval_20250724_010.tar.gz",
+      "canonical_task": "Wearing_A_Strip_Rack_Hanging_Clothes_For_Retrieval",
+      "action_text": "wearing a strip rack hanging clothes for retrieval",
+      "intent": "dress",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "clothes",
+        "hanging",
+        "rack",
+        "retrieval",
+        "strip",
+        "wearing"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Wipe_The_Desktop_20250801_012.tar.gz",
+      "canonical_task": "Wipe_The_Desktop",
+      "action_text": "wipe the desktop",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "desktop",
+        "wipe"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Wipe_The_Desktop_20250804_011.tar.gz",
+      "canonical_task": "Wipe_The_Desktop",
+      "action_text": "wipe the desktop",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "desktop",
+        "wipe"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Wipe_The_Sewage_Stains_With_A_Ground_Cloth_20250709_006.tar.gz",
+      "canonical_task": "Wipe_The_Sewage_Stains_With_A_Ground_Cloth",
+      "action_text": "wipe the sewage stains with a ground cloth",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "cloth",
+        "ground",
+        "sewage",
+        "stains",
+        "wipe"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Wipe_The_Sewage_Stains_With_A_Ground_Cloth_20250725_010.tar.gz",
+      "canonical_task": "Wipe_The_Sewage_Stains_With_A_Ground_Cloth",
+      "action_text": "wipe the sewage stains with a ground cloth",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "cloth",
+        "ground",
+        "sewage",
+        "stains",
+        "wipe"
+      ]
+    },
+    {
+      "source_archive": "lerobot/Wipe_The_Sewage_Stains_With_A_Ground_Cloth_20250801_012.tar.gz",
+      "canonical_task": "Wipe_The_Sewage_Stains_With_A_Ground_Cloth",
+      "action_text": "wipe the sewage stains with a ground cloth",
+      "intent": "clean",
+      "venue_tag": "home",
+      "sociality": "solo",
+      "confidence": 0.8,
+      "tokens": [
+        "cloth",
+        "ground",
+        "sewage",
+        "stains",
+        "wipe"
+      ]
+    }
+  ]
+}

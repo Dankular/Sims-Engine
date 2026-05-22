@@ -5,7 +5,7 @@ Usage
 -----
 # Wrap any LLMBackend:
 from llm.timing import TimedBackend, store
-llm = TimedBackend(raw_backend, name="ollama/qwen2.5:3b")
+llm = TimedBackend(raw_backend, name="llama-server/qwen3.5-0.8b-mtp")
 
 # Time a named boot phase:
 with store.phase("datasets"):

@@ -88,70 +88,22 @@ class LlamaCppBackend:
         temperature: float = 0.7,
         schema: dict | None = None,
     ) -> str:
-        # Qwen3 chat template — /no_think suppresses chain-of-thought
+        # Qwen2.5 chat template
         prompt = (
             f"<|im_start|>system\n{system}<|im_end|>\n"
-            f"<|im_start|>user\n{user}\n/no_think<|im_end|>\n"
+            f"<|im_start|>user\n{user}<|im_end|>\n"
             f"<|im_start|>assistant\n"
         )
-        kwargs: dict = dict(
+        output = self._llm(
+            prompt,
             max_tokens=max_tokens,
             temperature=temperature,
             stop=["<|im_end|>", "<|endoftext|>"],
             echo=False,
         )
-        if schema is not None:
-            kwargs["response_format"] = {"type": "json_object", "schema": schema}
-        output = self._llm(prompt, **kwargs)
         text = output["choices"][0]["text"].strip()
         return _THINK_RE.sub("", text).strip()
 
-
-class OllamaBackend:
-    def __init__(
-        self,
-        model: str | None = None,
-        url: str | None = None,
-        timeout: int | None = None,
-    ):
-        self._model = model or os.environ.get("SIM_V2_OLLAMA_MODEL", "qwen2.5:3b")
-        self._url = url or os.environ.get(
-            "SIM_V2_OLLAMA_URL", "http://localhost:11434/api/chat"
-        )
-        self._timeout = timeout or int(os.environ.get("SIM_V2_OLLAMA_TIMEOUT", "120"))
-
-    def chat(
-        self,
-        system: str,
-        user: str,
-        max_tokens: int = 800,
-        temperature: float = 0.7,
-        schema: dict | None = None,
-    ) -> str:
-        payload: dict = {
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": f"{user}\n/no_think"},
-            ],
-            "stream": False,
-            "think": False,
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_tokens,
-            },
-        }
-        if schema is not None:
-            payload["format"] = schema
-
-        response = requests.post(self._url, json=payload, timeout=self._timeout)
-        response.raise_for_status()
-        data = response.json()
-        text = (data.get("message") or {}).get("content", "")
-        # Ollama returns exact token counts — stash them for the timing store
-        self._last_prompt_tokens = data.get("prompt_eval_count", 0)
-        self._last_output_tokens = data.get("eval_count", 0)
-        return _THINK_RE.sub("", text).strip()
 
 
 class LlamaServerBackend:
@@ -190,13 +142,10 @@ class LlamaServerBackend:
         if self._model:
             payload["model"] = self._model
         if schema is not None:
-            payload["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "sim_v2_schema",
-                    "schema": schema,
-                },
-            }
+            # Use json_object mode (stable) rather than json_schema/peg-native which
+            # can crash llama-server with MTP models. The system prompt already
+            # instructs JSON-only output with concise string lengths.
+            payload["response_format"] = {"type": "json_object"}
 
         response = requests.post(self._url, json=payload, timeout=self._timeout)
         response.raise_for_status()
@@ -243,14 +192,12 @@ class BackgroundLLMBackend(LlamaCppBackend):
 
 
 def create_backend(name: str | None = None) -> LLMBackend:
-    backend = (name or os.environ.get("SIM_V2_LLM_BACKEND", "llama-cpp")).lower()
-    if backend == "ollama":
-        return OllamaBackend()
+    backend = (name or os.environ.get("SIM_V2_LLM_BACKEND", "llama-server")).lower()
     if backend in {"llama-server", "server"}:
         return LlamaServerBackend()
     if backend in {"llama-cpp", "llamacpp", "cpp"}:
         return LlamaCppBackend()
-    raise ValueError(f"Unknown LLM backend: {backend}")
+    raise ValueError(f"Unknown LLM backend: {backend!r}. Use 'llama-server' or 'llama-cpp'.")
 
 
 def create_background_backend(name: str | None = None) -> LLMBackend | None:
@@ -265,7 +212,7 @@ def create_background_backend(name: str | None = None) -> LLMBackend | None:
     try:
         if backend in {"llama-cpp", "llamacpp", "cpp"}:
             return BackgroundLLMBackend()
-        # Ollama / llama-server: reuse the same endpoint, models handle concurrency
+        # llama-server: reuse the same endpoint, server handles concurrency
         return create_backend(name)
     except Exception as exc:
         import logging

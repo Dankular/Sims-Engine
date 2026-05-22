@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import os
 import random
+import secrets
 from typing import TYPE_CHECKING, Any
 
 from config import (
@@ -30,6 +32,7 @@ from narrative.gossip import GossipGraph
 from narrative.life_events import run_life_event_llm
 from sim_types.enums import LODTier
 from world.venues import VENUES, AudioEnvironmentSensor
+from engine.natives import NativeRegistry
 
 if TYPE_CHECKING:
     from core.sim import Sim
@@ -98,7 +101,9 @@ class SimEngine:
         self._pending: list[PendingInteraction] = []
 
         self._audio_sensor = AudioEnvironmentSensor()
+        self.venues_catalog = list(VENUES)
         self._venue: dict = {**random.choice(VENUES), **self._audio_sensor.sense()}
+        self.natives = NativeRegistry(self)
         self.households: list = []
 
         # ── New systems ───────────────────────────────────────────────────────
@@ -161,6 +166,19 @@ class SimEngine:
         from world.life_state import LifeStateSystem
         from world.neighborhoods import NeighborhoodSystem
         from world.objects import ObjectManager
+        from world.shopping import ShoppingCenter
+        from world.pets import PetManager
+        from world.ledger import SimLedger
+        from world.contracts import ContractEngine
+        from world.stocks import StockMarket as WorldStockMarket
+        from world.tokens import TokenEconomy
+        from world.bookie import BookieSystem
+        from config import MARKET_SHOPS
+        from world.lot_layout import LotLayout
+        from world.dynasty import DynastyManager
+        from world.burglar import BurglarSystem
+        from world.grim_reaper import GrimReaperNPC
+        from engine.neural_policy import NeuralInteractionPolicy
 
         self.career_manager = _CareerManager()
         self.cleanliness = CleanlinessSystem()
@@ -171,6 +189,39 @@ class SimEngine:
         self.life_states = LifeStateSystem()
         self.neighborhoods = NeighborhoodSystem()
         self.objects = ObjectManager()
+        self.lot_layout = LotLayout()
+        self.grim_reaper = GrimReaperNPC()
+        self.shopping = ShoppingCenter()
+        self.dynasties = DynastyManager()
+        self.burglar = BurglarSystem()
+        self.neural_policy = NeuralInteractionPolicy()
+        self.pets = PetManager()
+        self.ledger = SimLedger(block_interval=5)
+        self.contracts_engine = ContractEngine()
+        self.stocks = WorldStockMarket()
+        self.tokens = TokenEconomy()
+        self.bookie = BookieSystem(
+            api_key=os.getenv("PANDASCORE_API_KEY", ""), poll_interval_ticks=5
+        )
+        self.wallet_nonces: dict[str, str] = {}
+        self.sim_wallet_links: dict[str, dict] = {}
+        self.wallet_mirror: dict[str, dict] = {}
+        self.chain_intents: list[dict] = []
+        for sim in self.sims:
+            self.tokens.ensure_wallet(sim.sim_id)
+        self._bus.on("gig_completed", self._on_gig_completed_economy)
+        self._bus.on("economy.purchase", self._on_economy_purchase)
+        self._bus.on("economy.trade", self._on_economy_trade)
+        self._bus.on("economy.rent_income", self._on_economy_rent_income)
+        self._bus.on("economy.gift", self._on_economy_gift)
+        self._bus.on(
+            "economy.contract_settlement", self._on_economy_contract_settlement
+        )
+        self._bus.on("economy.contract_breach", self._on_economy_contract_breach)
+        self._bus.on("item_crafted", self._on_item_crafted_tokenization)
+        self._bus.on("burglary_started", self._on_burglar_market_shock)
+        self._bus.on("burglary_resolved", self._on_burglar_market_shock)
+        self._bus.on("sim_died", self._on_grim_market_shock)
 
         # Seed world lots and sim inventories from object catalog (if available)
         lot_ids = [
@@ -189,8 +240,44 @@ class SimEngine:
             for lot in neighborhood.lots
         }
         self.objects.assign_world_objects(lot_ids, lot_rules=lot_rules)
+        if self.shopping.lot_id not in self.objects.lot_object_stock:
+            self.objects.assign_world_objects([self.shopping.lot_id], density=20)
+        shop_ids = [s.get("lot_id") for s in MARKET_SHOPS if s.get("lot_id")]
+        if shop_ids:
+            shop_rules = {
+                s["lot_id"]: {
+                    "type": "business",
+                    "venue_assignment": s.get("venue_assignment", "retail_store"),
+                    "focus_types": list(s.get("focus", [])),
+                    "strict_focus": True,
+                }
+                for s in MARKET_SHOPS
+                if s.get("lot_id")
+            }
+            self.objects.assign_world_objects(
+                shop_ids, density=22, lot_rules=shop_rules
+            )
         for sim in self.sims:
             self.objects.assign_sim_inventory(sim)
+
+        by_household: dict[str, list[str]] = {}
+        for sim in self.sims:
+            hid = str(getattr(sim, "household_id", "") or "")
+            if hid:
+                by_household.setdefault(hid, []).append(sim.sim_id)
+        for hid, member_ids in by_household.items():
+            if not member_ids:
+                continue
+            d = self.dynasties.create_dynasty(
+                creator_id=member_ids[0],
+                name=f"Household {hid[:8]}",
+                description="Auto-created household dynasty",
+                member_ids=member_ids[1:],
+            )
+            for sid in member_ids:
+                sim_obj = self._sim_lookup.get(sid)
+                if sim_obj:
+                    self.dynasties.assign_sim(sim_obj, d.dynasty_id)
 
         # Central life event engine (P0 context-aware framework)
         from narrative.event_engine import EventEngine as _EventEngine
@@ -200,16 +287,292 @@ class SimEngine:
 
         self.aspiration_system = AspirationSystem()
         from core.adaptive_policy import AdaptiveBandit
+        from core.conversation_arc_policy import ConversationArcPolicy
 
         self.adaptive_policy = AdaptiveBandit()
+        self.arc_policy = ConversationArcPolicy()
 
         self._bus.on("tick_complete", self._on_tick_complete)
         assign_lod_tiers(self.sims)
+
+        # ── Scalability systems ───────────────────────────────────────────────
+        from engine.shard import ShardManager
+        from engine.budget import BudgetedScheduler
+        from engine.aoi import AOIManager
+        from engine.pair_cache import PairFeatureCache
+        from persistence.event_log import EventLog
+        from config import (
+            ACTIVE_SIMS_PER_TICK,
+            BG_SIMS_PER_TICK,
+            SNAPSHOT_INTERVAL,
+            SIM_DB_PATH,
+        )
+
+        self._shard_manager = ShardManager(self._bus)
+        self._budget = BudgetedScheduler(
+            budget=ACTIVE_SIMS_PER_TICK, bg_budget=BG_SIMS_PER_TICK
+        )
+        self.aoi = AOIManager()
+        self._pair_cache = PairFeatureCache()
+
+        _event_log_path = SIM_DB_PATH.replace(".db", "_events.db")
+        self._event_log = EventLog(_event_log_path)
+
+        # Assign sims to shards by current lot / household
+        self._sim_shard_cache: dict[str, str] = {}
+        for sim in sims:
+            shard_id = (
+                str(getattr(sim, "current_lot_id", "") or "")
+                or str(getattr(sim, "household_id", "") or "")
+                or "global"
+            )
+            self._shard_manager.assign(sim.sim_id, shard_id)
+            self._sim_shard_cache[sim.sim_id] = shard_id
+
+        # Per-sim state hash for NATS compact diffs
+        self._state_hash: dict[str, int] = {}
+
+        # ── SimChain (blockchain) ─────────────────────────────────────────────
+        from config import CHAIN_BLOCK_INTERVAL
+        from blockchain.chain import SimChain
+        from blockchain.wallet import SimWallet
+        from blockchain.node import ChainNode
+        from blockchain.contracts.simcoin import SimCoin
+        from blockchain.contracts.shop_registry import ShopRegistry
+        from blockchain.contracts.sim_agreement import AgreementEngine
+        from blockchain.contracts.stock_market import StockMarket
+        from world.web3_bridge import Web3Bridge
+
+        _validator_wallet = SimWallet.from_label("validator")
+        self.chain = SimChain(validator_address=_validator_wallet.address)
+
+        # Deploy contracts
+        self.chain.deploy(SimCoin())
+        self.chain.deploy(ShopRegistry())
+        self.chain.deploy(AgreementEngine())
+        self.chain.deploy(StockMarket())
+
+        self.chain_node = ChainNode(
+            chain=self.chain,
+            wallet=_validator_wallet,
+            bus=self._bus,
+            block_interval=CHAIN_BLOCK_INTERVAL,
+        )
+        self.web3 = Web3Bridge(self.chain)
+
+        # Register wallets and mint genesis SimCoin from starting simoleons
+        for sim in sims:
+            self.web3.register_sim(sim.sim_id, initial_simoleons=sim.simoleons)
+
+        logger.info(
+            "[Engine] SimChain online — validator=%s, %d wallets",
+            _validator_wallet.address[:12],
+            len(sims),
+        )
 
         # Network layer — None until attach_network() is called
         self._network = None
         self._current_room: str = "global"
         self._local_sim_ids: set[str] = {s.sim_id for s in sims}
+
+        # ChainBridge — financial chokepoint routing simoleons ↔ $SIM
+        from engine.chain_bridge import ChainBridge
+        self._bridge = ChainBridge(self.web3)
+
+        # ── ACID Financial Ledger ─────────────────────────────────────────────
+        from persistence.ledger import FinancialLedger
+        from config import SIM_DB_PATH
+        _ledger_path = SIM_DB_PATH.replace(".db", "_ledger.db")
+        self.financial_ledger = FinancialLedger(_ledger_path)
+        logger.info("[Engine] ACID financial ledger → %s", _ledger_path)
+
+        # ── City Bank + Collateral ────────────────────────────────────────────
+        from world.bank import CityBank
+        from core.collateral import CollateralEngine
+        _bank_path = SIM_DB_PATH.replace(".db", "_bank.db")
+        self.bank       = CityBank(_bank_path)
+        self.collateral = CollateralEngine()
+
+        # Create bank accounts for all starting sims
+        for sim in sims:
+            self.bank.ensure_account(sim.sim_id)
+
+        # ── Real-time heartbeat loop ──────────────────────────────────────────
+        from engine.heartbeat import HeartbeatLoop
+        self.heartbeat = HeartbeatLoop(self)
+
+        logger.info("[Engine] City Bank → %s | Heartbeat ready", _bank_path)
+
+        # Give each sim a back-reference so world modules can reach the bridge
+        for sim in sims:
+            sim._engine_ref = self
+
+        # ── Closed-loop cognition systems ────────────────────────────────────
+        from core.intention import IntentionStack, maybe_generate_intention
+        from core.beliefs import BeliefGraph
+        from core.rumor import RumorNetwork
+        from core.consequences_hard import HardConsequenceEngine
+        from world.institutions import InstitutionalSanctions
+        from engine.pressure import PressureIndex
+        from core.negotiation import NegotiationEngine
+        from analytics.emergence import EmergenceDashboard
+        from core.identity_drift import TraitDriftEngine
+
+        # Attach per-sim cognition state
+        for sim in sims:
+            if not hasattr(sim, "intentions"):
+                sim.intentions = IntentionStack()
+            if not hasattr(sim, "beliefs"):
+                sim.beliefs = BeliefGraph()
+
+        self.rumor_network       = RumorNetwork()
+        self.hard_consequences   = HardConsequenceEngine()
+        self.institutions        = InstitutionalSanctions()
+        self.pressure_engine     = PressureIndex()
+        self.negotiation         = NegotiationEngine()
+        self.emergence           = EmergenceDashboard()
+        self.trait_drift         = TraitDriftEngine()
+
+        logger.info("[Engine] Closed-loop cognition systems initialised")
+
+    # ── Unified financial transaction method ─────────────────────────────────
+    #
+    # _tx() is the SINGLE correct way to change sim.simoleons.
+    # It writes to the ACID ledger FIRST, then updates sim.simoleons.
+    # Direct sim.simoleons mutations elsewhere bypass the audit trail.
+
+    def _tx(
+        self,
+        sim: "Sim",
+        amount: float,
+        tx_type: str,
+        counterpart: str = "",
+        description: str = "",
+        metadata: dict | None = None,
+        allow_overdraft: bool = False,
+    ) -> bool:
+        """
+        Record + apply a financial transaction atomically.
+
+        amount > 0 = income (salary, gig, dividend …)
+        amount < 0 = expense (shop, tax, living cost …)
+
+        Returns True on success, False if rejected (insufficient funds /
+        ledger error). sim.simoleons is unchanged on False.
+        Also mirrors to ChainBridge for on-chain $SIM accounting.
+        """
+        from persistence.ledger import InsufficientFundsError
+        from config import COLLATERAL_TRIGGER_BALANCE
+        if amount == 0.0:
+            return True
+        try:
+            self.financial_ledger.record_tx(
+                sim, amount, tx_type,
+                tick=self._tick_count,
+                counterpart=counterpart,
+                description=description,
+                metadata=metadata,
+                allow_overdraft=allow_overdraft,
+            )
+        except InsufficientFundsError as exc:
+            logger.debug("[_tx] Rejected: %s", exc)
+            return False
+        except Exception as exc:
+            logger.warning("[_tx] Ledger error (%s %s %.2f): %s",
+                           getattr(sim, "name", "?"), tx_type, amount, exc)
+            # Fallback: still update simoleons so the game doesn't stall
+            if amount > 0:
+                sim.simoleons += amount
+            else:
+                sim.simoleons = max(-1_000_000.0, sim.simoleons + amount)
+            return True
+
+        # Mirror to chain (async, non-blocking — never blocks the tick)
+        try:
+            from persistence.ledger import _INCOME_TYPES, _EXPENSE_TYPES
+            if amount > 0 and tx_type in _INCOME_TYPES:
+                self._bridge.pay(sim, amount, tx_type)
+            elif amount < 0 and tx_type in _EXPENSE_TYPES:
+                self._bridge.charge(sim, abs(amount), tx_type)
+        except Exception:
+            pass
+
+        # Collateral evaluation — fires when balance crosses the trigger
+        if hasattr(self, "collateral") and sim.simoleons < COLLATERAL_TRIGGER_BALANCE:
+            try:
+                self.collateral.evaluate(sim, self)
+            except Exception:
+                pass
+
+        return True
+
+    def _tx_transfer(
+        self,
+        from_sim: "Sim",
+        to_sim: "Sim",
+        amount: float,
+        tx_type_out: str = "",
+        tx_type_in: str = "",
+        counterpart_label: str = "",
+        description: str = "",
+        metadata: dict | None = None,
+    ) -> bool:
+        """
+        Atomic peer-to-peer transfer. Both legs recorded; either both succeed
+        or the whole operation is rejected (sender checked first).
+        """
+        from persistence.ledger import TX_TRANSFER_OUT, TX_TRANSFER_IN, InsufficientFundsError
+        out_type = tx_type_out or TX_TRANSFER_OUT
+        in_type  = tx_type_in  or TX_TRANSFER_IN
+        label    = counterpart_label or from_sim.sim_id
+        try:
+            self.financial_ledger.record_tx(
+                from_sim, -amount, out_type,
+                tick=self._tick_count,
+                counterpart=to_sim.sim_id,
+                description=description or f"transfer → {to_sim.name}",
+                metadata=metadata,
+            )
+            self.financial_ledger.record_tx(
+                to_sim, amount, in_type,
+                tick=self._tick_count,
+                counterpart=from_sim.sim_id,
+                description=description or f"transfer ← {from_sim.name}",
+                metadata=metadata,
+            )
+        except InsufficientFundsError as exc:
+            logger.debug("[_tx_transfer] Rejected: %s", exc)
+            return False
+        except Exception as exc:
+            logger.warning("[_tx_transfer] Ledger error: %s", exc)
+            return False
+        # Chain mirror
+        try:
+            self._bridge.transfer(from_sim, to_sim, amount, description or out_type)
+        except Exception:
+            pass
+        return True
+
+    # ── Backward-compat shims (callers gradually migrated to _tx) ─────────────
+
+    def _pay(self, sim: "Sim", amount: float, reason: str) -> None:
+        from persistence.ledger import TX_SALARY
+        self._tx(sim, abs(amount), reason if reason else TX_SALARY,
+                 description=reason)
+
+    def _charge(self, sim: "Sim", amount: float, reason: str,
+                shop_name: str = "", item: str = "") -> bool:
+        from persistence.ledger import TX_SHOP_PURCHASE
+        tx_type = TX_SHOP_PURCHASE if reason == "shop_purchase" else reason
+        meta = {"shop_name": shop_name, "item": item} if shop_name else None
+        return self._tx(sim, -abs(amount), tx_type,
+                        counterpart=shop_name or "",
+                        description=f"{item} at {shop_name}" if item else reason,
+                        metadata=meta)
+
+    def _transfer_funds(self, from_sim: "Sim", to_sim: "Sim",
+                        amount: float, reason: str) -> bool:
+        return self._tx_transfer(from_sim, to_sim, amount, description=reason)
 
     @property
     def tick_count(self) -> int:
@@ -249,11 +612,16 @@ class SimEngine:
             item.sim_b_id for item in self._pending
         }
 
-        for sim in self.sims:
-            if sim.lod_tier == LODTier.DORMANT:
-                sim.needs.hunger = max(0, sim.needs.hunger - NEEDS_DECAY * 0.5)
-                sim.needs.energy = max(0, sim.needs.energy - NEEDS_DECAY * 0.4)
-                continue
+        # Budgeted scheduling — rebuild queues then process only N active sims
+        self._budget.rebuild(self.sims)
+        _active_batch = self._budget.next_active_batch()
+
+        # Minimal decay for dormant sims (no full tick)
+        for sim in self._budget.dormant_sims():
+            sim.needs.hunger = max(0, sim.needs.hunger - NEEDS_DECAY * 0.5)
+            sim.needs.energy = max(0, sim.needs.energy - NEEDS_DECAY * 0.4)
+
+        for sim in _active_batch:
             sim._current_tick = self._tick_count
             sim.tick(self.wants_engine, all_sim_ids)
 
@@ -300,10 +668,7 @@ class SimEngine:
                     if closest_id:
                         set_goal_from_arc(sim, arc_key, closest_id, self._tick_count)
                 # Post-grief recovery: arc completed but still socially depleted
-                elif (
-                    sim.grief_stage == -1
-                    and getattr(sim, "grief_target", "")
-                ):
+                elif sim.grief_stage == -1 and getattr(sim, "grief_target", ""):
                     if sim.needs.social >= 30:
                         # Social has recovered — exit recovery state entirely
                         sim.grief_target = ""
@@ -314,7 +679,9 @@ class SimEngine:
                                 sim, "grief:recovery", closest_id, self._tick_count
                             )
                             if hasattr(sim, "moodlets"):
-                                sim.moodlets.add("lonely", source="post_grief_isolation")
+                                sim.moodlets.add(
+                                    "lonely", source="post_grief_isolation"
+                                )
                 # Loneliness → seek comfort goal
                 from core.arcs import is_lonely
 
@@ -454,19 +821,33 @@ class SimEngine:
                 pressures = sim.needs.pressure_vector()
                 for shop in SHOP_DEFS:
                     if pressures.get(shop["need"], 0) > 0.75:
-                        visit_shop(sim, shop)
+                        visit_shop(sim, shop, engine=self)
                         break
+
+        # Neural planner: object-oriented goal resolution + store acquisition
+        self._run_neural_planning(active_only=True)
+        self._process_neural_consequences()
 
         # LOD reassignment every tick
         assign_lod_tiers(self.sims)
 
-        # Background LOD: lightweight heuristic interactions
-        background = [s for s in self.sims if s.lod_tier == LODTier.BACKGROUND]
-        if len(background) >= 2:
-            bg_a = random.choice(background)
-            bg_b = random.choice([s for s in background if s is not bg_a])
+        # Shard reassignment — update when sims change location
+        for sim in self.sims:
+            new_shard = (
+                str(getattr(sim, "current_lot_id", "") or "")
+                or str(getattr(sim, "household_id", "") or "")
+                or "global"
+            )
+            if self._sim_shard_cache.get(sim.sim_id) != new_shard:
+                self._shard_manager.assign(sim.sim_id, new_shard)
+                self._sim_shard_cache[sim.sim_id] = new_shard
+                self._pair_cache.bump_sim(sim.sim_id)
+
+        # Background LOD: lightweight heuristic interactions (budgeted)
+        _bg_batch = self._budget.next_bg_batch()
+        if len(_bg_batch) >= 2:
             heuristic_background_interaction(
-                bg_a, bg_b, self.relationships, self._bg_llm
+                _bg_batch[0], _bg_batch[1], self.relationships, self._bg_llm
             )
 
         # Active LOD: queue one LLM interaction when the queue is empty
@@ -488,16 +869,59 @@ class SimEngine:
         # Player-directed control has priority over autonomous selection.
         self._process_control_directives()
 
+        # Sensor summary for context builder (weather/calendar/venue/neighborhood)
+        date = self.calendar.date_dict(self._tick_count)
+        curw = getattr(self.weather, "current", None)
+        w_cond = str(getattr(curw, "condition", "clear"))
+        w_temp = float(getattr(curw, "temperature", 20.0))
+        spec = (
+            ",".join(sorted(set(self.neighborhoods.specialization.values()))[:3])
+            or "mixed"
+        )
+        for s in candidates:
+            s._world_context_line = (
+                f"weather={w_cond} temp_c={w_temp:.1f} season={date.get('season', 'unknown')} "
+                f"day={date.get('day_of_year', 0)} venue={self._venue.get('name', '')} district_modes={spec}"
+            )
+
+        # Keep high-salience world context fresh before selecting interaction
+        self.weather.tick(self)
+        self.calendar.tick(self)
+
         if len(candidates) >= 2 and not self._pending:
-            pair = pick_interaction_pair(candidates, self.relationships)
+            # Strict location gating: pair only from the same occupied lot.
+            by_lot: dict[str, list[Sim]] = {}
+            for s in candidates:
+                lid = str(
+                    getattr(s, "current_lot_id", "") or getattr(s, "household_id", "")
+                )
+                by_lot.setdefault(lid, []).append(s)
+            viable_lots = [
+                lid for lid, sims in by_lot.items() if lid and len(sims) >= 2
+            ]
+            pair = None
+            if viable_lots:
+                chosen_lot = random.choice(viable_lots)
+                pair = pick_interaction_pair(by_lot[chosen_lot], self.relationships)
             if pair:
                 sim_a, sim_b = pair
                 rel = self.relationships.get(sim_a.sim_id, sim_b.sim_id)
+                rel.shared_memory_count = self._pair_memory_count(
+                    sim_a.sim_id, sim_b.sim_id
+                )
                 # Stamp venue name on sim so scheduler can use DailyDialog topic
                 sim_a._current_venue_name = self._venue.get("name", "")
+                sim_a._current_venue = dict(self._venue)
+                forced = self.neural_policy.apply_pre_interaction(sim_a)
+                if forced:
+                    sim_a._neural_forced_interaction = forced
                 interaction = choose_interaction(
                     sim_a, sim_b, rel, self._tick_count, self._datasets
                 )
+                if hasattr(sim_a, "_neural_plan") and isinstance(
+                    sim_a._neural_plan, dict
+                ):
+                    sim_a._neural_plan["social_action"] = interaction
                 if self._network and sim_b.sim_id not in self._local_sim_ids:
                     # Remote sim — submit via NATS in the thread pool (non-blocking)
                     self._pool.submit(
@@ -537,6 +961,10 @@ class SimEngine:
         self._run_property_system()
         self._run_business_system()
         self._run_education_system()
+        self.objects.tick_market(self._tick_count)
+        self.shopping.tick(self)
+        self.dynasties.tick(self)
+        self.pets.tick(self)
         self._run_university_system()
         self._run_career_progression_system()
         self._run_occult_system()
@@ -625,14 +1053,14 @@ class SimEngine:
         self.event_engine.tick(self)
 
         # ── New systems (Tier 1 & 2 gaps) ────────────────────────────────────
-        self.weather.tick(self)
         self.crafting.tick(self)
         self.phone.tick(self)
         self.gigs.tick(self)
         self.properties.tick(self)
-        self.calendar.tick(self)
+        self._feed_stock_from_properties()
         self.illness.tick(self)
         self.pregnancy.tick(self)
+        self.bookie.tick(self)
         self.career_manager.tick(self)
         self.cleanliness.tick(self)
         self.programming.tick(self)
@@ -641,6 +1069,36 @@ class SimEngine:
         self.skill_classes.tick(self)
         self.life_states.tick(self)
         self.neighborhoods.tick(self)
+        self.stocks.tick(self)
+        contract_events = self.contracts_engine.tick(self)
+        for evt in contract_events:
+            evt_type = str(evt.get("type", "contract_event"))
+            self._bus.emit(evt_type, **evt)
+            if evt_type in {"contract_settlement", "contract_settled"}:
+                self._emit_economy_event("economy.contract_settlement", **evt)
+            if "breach" in evt_type:
+                self._emit_economy_event("economy.contract_breach", **evt)
+                self._adjudicate_contract_dispute(evt)
+
+        block = self.ledger.tick(self._tick_count)
+        if block:
+            self._bus.emit(
+                "ledger_block",
+                index=block.index,
+                hash=block.block_hash,
+                tx_count=len(block.txs),
+                tick=self._tick_count,
+            )
+
+        # Passive home-object ambient effects
+        for sim in self.sims:
+            if getattr(sim, "household_id", None):
+                self.lot_layout.tick_passive_effects(sim, sim.household_id)
+
+        # Grim Reaper NPC tick (lingering, departure)
+        self.grim_reaper.tick(self)
+        self.burglar.tick(self, hour)
+        self._risk_counterplay_tick()
 
         # Tick moodlets on all sims
         for sim in self.sims:
@@ -717,12 +1175,56 @@ class SimEngine:
         if self._tick_count % 5 == 0:
             self._update_celebrity_scores()
 
-        # Broadcast local sim states to the network room (no-op when offline)
+        # ── SimChain: produce block, tick agreements + stock noise, sync balances ──
+        try:
+            self.chain_node.tick()
+            self.web3.tick(self)
+            self.web3.sync_balances(self)
+        except Exception as _ce:
+            logger.debug("[Chain] tick error: %s", _ce)
+
+        # ── Closed-loop cognition tick ────────────────────────────────────────
+        try:
+            self._tick_intentions()
+            self._tick_beliefs()
+            self.institutions.tick(self)
+            self.pressure_engine.tick(self)
+            self.negotiation.tick(self)
+            self.trait_drift.tick(self)
+            self.emergence.snapshot(self)
+            # Rumor propagation every 3 ticks
+            if self._tick_count % 3 == 0:
+                rumor_events = self.rumor_network.tick(self.sims, self._tick_count)
+                for rev in rumor_events:
+                    self._bus.emit("rumor_event", **rev, tick=self._tick_count)
+        except Exception as _cle:
+            logger.debug("[Cognition] tick error: %s", _cle)
+
+        # Broadcast compact state diffs to NATS (no-op when offline)
         if self._network:
             self._network.publish_states(
                 self._current_room,
-                [self._sim_to_network_state(s) for s in self.sims],
+                self._build_state_diffs(),
             )
+
+        # Periodic world snapshot for event-sourcing recovery
+        from config import SNAPSHOT_INTERVAL
+
+        if self._tick_count % SNAPSHOT_INTERVAL == 0:
+            try:
+                self._event_log.write_snapshot(self._tick_count, self.get_state())
+            except Exception as exc:
+                logger.warning("[EventLog] snapshot failed: %s", exc)
+            # Ledger balance snapshots — enables fast "balance at tick T" queries
+            for sim in self.sims:
+                try:
+                    self.financial_ledger.snapshot_balance(
+                        sim.sim_id, self._tick_count, sim.simoleons
+                    )
+                except Exception:
+                    pass
+        else:
+            self._event_log.flush()  # drain buffered deltas every tick
 
         self._bus.emit("tick_complete", engine=self, tick=self._tick_count, hour=hour)
 
@@ -788,6 +1290,9 @@ class SimEngine:
                     "active_odd_job": sim.active_odd_job,
                     "odd_job_reputation": round(sim.odd_job_reputation, 1),
                     "hazard_flags": dict(sim.hazard_flags),
+                    "last_threat_response": dict(
+                        getattr(sim, "_last_threat_response", {})
+                    ),
                     "owned_businesses": list(sim.owned_businesses),
                     "career_level": sim.career_level,
                     "career_branch": sim.career_branch,
@@ -919,7 +1424,48 @@ class SimEngine:
                     "completed_aspirations": list(
                         getattr(sim, "completed_aspirations", [])
                     ),
+                    "knowledge_aspiration": {
+                        "curiosity": round(
+                            getattr(
+                                getattr(sim, "knowledge_aspiration", None),
+                                "curiosity",
+                                0.0,
+                            ),
+                            3,
+                        ),
+                        "learning_drive": round(
+                            getattr(
+                                getattr(sim, "knowledge_aspiration", None),
+                                "learning_drive",
+                                0.0,
+                            ),
+                            3,
+                        ),
+                        "fearlessness": round(
+                            getattr(
+                                getattr(sim, "knowledge_aspiration", None),
+                                "fearlessness",
+                                0.0,
+                            ),
+                            3,
+                        ),
+                        "fulfillment": round(
+                            getattr(
+                                getattr(sim, "knowledge_aspiration", None),
+                                "fulfillment",
+                                0.0,
+                            ),
+                            2,
+                        ),
+                        "title": getattr(
+                            getattr(sim, "knowledge_aspiration", None),
+                            "title",
+                            "",
+                        ),
+                    },
                     "club_count": len(getattr(sim, "club_ids", [])),
+                    "dynasty_id": getattr(sim, "dynasty_id", None),
+                    "dynasty_role": getattr(sim, "dynasty_role", "member"),
                     "known_events": self.event_engine.get_events_known_by(
                         sim.sim_id, limit=5
                     ),
@@ -933,6 +1479,14 @@ class SimEngine:
                     "adaptive_policy": self.adaptive_policy.debug_for(
                         sim.sim_id, limit=8
                     ),
+                    "arc_policy": self.arc_policy.debug_sim(sim.sim_id),
+                    "conversation_stage": getattr(
+                        sim, "_conversation_stage", "small_talk"
+                    ),
+                    "conversation_stage_turns": getattr(
+                        sim, "_conversation_stage_turns", 0
+                    ),
+                    "consent_state": getattr(sim, "_consent_state", {}),
                     "control_mode": str(getattr(sim, "control_mode", "autonomous")),
                     "player_action_queue": list(
                         getattr(sim, "player_action_queue", [])
@@ -1010,7 +1564,89 @@ class SimEngine:
                 lot_id: dict(stock)
                 for lot_id, stock in self.objects.lot_object_stock.items()
             },
+            "market": self.objects.market_state(),
+            "dynasties": self.dynasties.state(),
+            "burglar": self.burglar.state(),
+            "neural_policy": self.neural_policy.debug_state(),
+            "pet_catalog_size": len(self.pets.list_catalog()),
+            "ledger": self.ledger.state(),
+            "contracts": self.contracts_engine.stats(),
+            "stocks": self.stocks.state(),
+            "tokens": self.tokens.state(),
+            "bookie": self.bookie.state(),
         }
+
+    def list_pet_catalog(self) -> list[dict]:
+        return self.pets.list_catalog()
+
+    def adopt_pet(self, sim_id: str, species: str | None = None) -> dict:
+        sim = self._sim_lookup.get(sim_id)
+        if sim is None:
+            return {"ok": False, "reason": "sim_not_found"}
+        result = self.pets.adopt_pet(sim, species=species)
+        if result.get("ok"):
+            self._bus.emit(
+                "pet_adopted", sim=sim, pet=result.get("pet"), tick=self._tick_count
+            )
+        return result
+
+    def buy_pet(self, sim_id: str, species: str | None = None) -> dict:
+        sim = self._sim_lookup.get(sim_id)
+        if sim is None:
+            return {"ok": False, "reason": "sim_not_found"}
+        result = self.pets.buy_pet(sim, species=species)
+        if result.get("ok"):
+            self._bus.emit(
+                "pet_bought", sim=sim, pet=result.get("pet"), tick=self._tick_count
+            )
+        return result
+
+    def feed_pet(self, sim_id: str, pet_id: str) -> dict:
+        sim = self._sim_lookup.get(sim_id)
+        if sim is None:
+            return {"ok": False, "reason": "sim_not_found"}
+        result = self.pets.feed_pet(sim, pet_id=pet_id)
+        if result.get("ok"):
+            self._bus.emit(
+                "pet_fed", sim=sim, pet=result.get("pet"), tick=self._tick_count
+            )
+        return result
+
+    def pet_pet(self, sim_id: str, pet_id: str) -> dict:
+        sim = self._sim_lookup.get(sim_id)
+        if sim is None:
+            return {"ok": False, "reason": "sim_not_found"}
+        result = self.pets.pet_pet(sim, pet_id=pet_id)
+        if result.get("ok"):
+            self._bus.emit(
+                "pet_interaction",
+                sim=sim,
+                pet=result.get("pet"),
+                tick=self._tick_count,
+            )
+        return result
+
+    def play_with_pet(self, sim_id: str, pet_id: str) -> dict:
+        sim = self._sim_lookup.get(sim_id)
+        if sim is None:
+            return {"ok": False, "reason": "sim_not_found"}
+        result = self.pets.play_with_pet(sim, pet_id=pet_id)
+        if result.get("ok"):
+            self._bus.emit(
+                "pet_play", sim=sim, pet=result.get("pet"), tick=self._tick_count
+            )
+        return result
+
+    def refill_pet_bowl(self, sim_id: str, lot_id: str) -> dict:
+        sim = self._sim_lookup.get(sim_id)
+        if sim is None:
+            return {"ok": False, "reason": "sim_not_found"}
+        result = self.pets.refill_food_bowl(sim, self.lot_layout, lot_id)
+        if result.get("ok"):
+            self._bus.emit(
+                "pet_bowl_refilled", sim=sim, lot_id=lot_id, tick=self._tick_count
+            )
+        return result
 
     def flush_pending(self) -> None:
         """Block until every outstanding LLM future is resolved and applied."""
@@ -1109,6 +1745,33 @@ class SimEngine:
             "ei_reputation": sim.ei_reputation,
             "social_orientation": sim.social_orientation,
         }
+
+    def _build_state_diffs(self) -> list[dict]:
+        """
+        Return only sims whose mutable state changed since the last publish.
+
+        We hash the four most volatile fields (needs, emotion, simoleons, lod).
+        Profile/trait fields are static enough to skip on every tick — they
+        were already sent on first publish (hash=0 sentinel).
+        """
+        diffs: list[dict] = []
+        for sim in self.sims:
+            needs = sim.needs
+            h = hash(
+                (
+                    round(needs.hunger, 0),
+                    round(needs.energy, 0),
+                    round(needs.social, 0),
+                    round(needs.fun, 0),
+                    sim.emotion.dominant,
+                    round(sim.simoleons, 0),
+                    sim.lod_tier.name,
+                )
+            )
+            if self._state_hash.get(sim.sim_id) != h:
+                self._state_hash[sim.sim_id] = h
+                diffs.append(self._sim_to_network_state(sim))
+        return diffs
 
     def _submit_remote_interaction(
         self, sim_a, target_sim_id: str, interaction: str
@@ -1238,7 +1901,7 @@ class SimEngine:
         )
 
         try:
-            result = call_adjudicator(self._llm, system, user_msg)
+            result = call_adjudicator(self._llm, system, user_msg, interaction=action)
         except Exception as exc:
             logger.warning("[Engine] remote adjudication failed: %s", exc)
             return {"error": str(exc)}
@@ -1247,6 +1910,10 @@ class SimEngine:
         fd = _to_float(result.get("friendship_delta", 0))
         rd = _to_float(result.get("romance_delta", 0))
         valence = max(-1.0, min(1.0, _to_float(result.get("valence", 0.5), 0.5)))
+        try:
+            self._witness_micro_effects(sim_a_stub, sim_b, valence)
+        except Exception:
+            pass
         rel.apply_deltas(fd, rd)
 
         emo_b = result.get("emotion_b", "")
@@ -1348,7 +2015,9 @@ class SimEngine:
         user_msg = self._build_user_message(
             sim_a, sim_b, interaction, rel, memories, venue, context_str
         )
-        future = self._pool.submit(call_adjudicator, self._llm, system, user_msg)
+        future = self._pool.submit(
+            call_adjudicator, self._llm, system, user_msg, interaction
+        )
         rel_key = (min(sim_a.sim_id, sim_b.sim_id), max(sim_a.sim_id, sim_b.sim_id))
         self._pending.append(
             PendingInteraction(
@@ -1379,6 +2048,119 @@ class SimEngine:
             interaction_id=iid,
             tick=self._tick_count,
         )
+
+    @staticmethod
+    def _advance_conversation_stage(
+        sim: "Sim",
+        partner_id: str,
+        rel,
+        valence: float,
+        current_tick: int,
+        arc_mult: float = 1.0,
+    ) -> None:
+        """Advance or regress the multi-turn conversation arc for *sim* toward *partner_id*.
+
+        Stages: small_talk → teasing → disclosure → affectionate_intent
+
+        Transitions are driven by:
+        - Relationship depth (friendship + romance thresholds)
+        - Moodlet state (flirty/alluring accelerates romantic track)
+        - Recent valence momentum (avg of last 3 buffer turns)
+        - Explicit consent tracking (prevents re-escalation after rejection)
+        - arc_mult: personality-adaptive multiplier from ConversationArcPolicy
+          > 1.3 → lower dwell threshold by 1 turn (advance faster)
+          < 0.7 → raise dwell threshold by 1 turn (stay cautious)
+        """
+        stage = getattr(sim, "_conversation_stage", "small_talk")
+        turns = getattr(sim, "_conversation_stage_turns", 0)
+        consent_map: dict = getattr(sim, "_consent_state", {})
+        consent = consent_map.get(partner_id, "")
+
+        friendship = rel.friendship
+        romance = rel.romance
+
+        # Personality-adaptive dwell adjustment
+        dwell_adj = -1 if arc_mult > 1.3 else (1 if arc_mult < 0.7 else 0)
+
+        # Moodlet check — flirty state lowers escalation thresholds
+        is_flirty = False
+        moodlets = getattr(sim, "moodlets", None)
+        if moodlets is not None:
+            try:
+                is_flirty = any(
+                    moodlets.has(k)
+                    for k in ("flirty", "alluring", "in_the_mood", "love_is_in_the_air")
+                )
+            except Exception:
+                pass
+
+        # Recent valence momentum from buffer (weighted toward newest)
+        buf = getattr(sim, "_dialogue_buffer", [])
+        recent_v = [
+            t.get("valence", valence)
+            for t in buf[-3:]
+            if (current_tick - t.get("tick", 0)) <= 15
+        ]
+        momentum = (sum(recent_v) / len(recent_v)) if recent_v else valence
+
+        # ── Consent bookkeeping ───────────────────────────────────────────────
+        if valence < -0.35 and stage in ("affectionate_intent", "teasing"):
+            consent_map[partner_id] = "withdrawn"
+        elif valence > 0.25 and romance >= 15 and consent != "withdrawn":
+            consent_map[partner_id] = "given"
+        sim._consent_state = consent_map
+
+        # ── Regress on sustained negative momentum ────────────────────────────
+        if momentum < -0.3:
+            regress = {
+                "affectionate_intent": "disclosure",
+                "disclosure": "teasing",
+                "teasing": "small_talk",
+            }
+            new = regress.get(stage, stage)
+            sim._conversation_stage = new
+            sim._conversation_stage_turns = 0
+            return
+
+        # ── Advance logic — dwell thresholds shifted by arc_mult ─────────────
+        turns += 1
+        new_stage = stage
+        # Minimum turns in stage before advancing; clamped to [1, 4]
+        dwell_teasing = max(1, 2 + dwell_adj)  # default 2
+        dwell_disclosure = max(1, 2 + dwell_adj)  # default 2
+
+        if stage == "small_talk":
+            if (
+                (friendship >= 15 or romance > 10 or is_flirty)
+                and momentum > 0
+                and turns >= max(1, 1 + dwell_adj)
+            ):
+                new_stage = "teasing"
+
+        elif stage == "teasing":
+            # Fast-track to affectionate if moodlet + romance without needing disclosure
+            if romance >= 20 and is_flirty and momentum > 0.15:
+                new_stage = "affectionate_intent"
+            elif friendship >= 30 and momentum > 0.05 and turns >= dwell_teasing:
+                new_stage = "disclosure"
+
+        elif stage == "disclosure":
+            if (
+                romance >= 25
+                and momentum > 0.05
+                and turns >= dwell_disclosure
+                and consent_map.get(partner_id) == "given"
+            ):
+                new_stage = "affectionate_intent"
+
+        # affectionate_intent: persist until consent withdrawn (handled above)
+
+        if new_stage != stage:
+            sim._conversation_stage = new_stage
+            sim._conversation_stage_turns = 0
+        else:
+            sim._conversation_stage = stage
+            sim._conversation_stage_turns = turns
 
     def _apply_resolved(self, item: PendingInteraction, result: dict) -> None:
         sim_a = self._sim_lookup.get(item.sim_a_id)
@@ -1429,6 +2211,8 @@ class SimEngine:
             pass
 
         rel.apply_deltas(fd, rd)
+        # Invalidate pair score cache after relationship delta
+        self._pair_cache.bump_pair(sim_a.sim_id, sim_b.sim_id)
 
         valence = max(-1.0, min(1.0, _to_float(result.get("valence", 0.5), 0.5)))
         # Online adaptive policy feedback (phase 1 contextual bandit)
@@ -1441,6 +2225,12 @@ class SimEngine:
                 + _to_float(result.get("fun_restore_a", 0)) * 0.03
             )
             self.adaptive_policy.observe(sim_a.sim_id, item.interaction, reward)
+            plan = getattr(sim_a, "_neural_plan", None)
+            if plan and plan.get("social_action") == item.interaction:
+                success = reward > 0.2
+                self.neural_policy.observe(
+                    sim_a, plan, reward=reward * 0.1, success=success
+                )
         except Exception:
             pass
 
@@ -1511,8 +2301,81 @@ class SimEngine:
             tick=self._tick_count,
         )
         rel.add_memory(memory_tag, valence, interaction_id=item.interaction_id)
+        try:
+            from core.consequences import record_consequence
 
-        # System 2: update dialogue buffer for both sims
+            sim_a._last_consequence = record_consequence(
+                sim_a, sim_b, rel, item.interaction, valence
+            )
+        except Exception:
+            pass
+
+        # ── Closed-loop cognition post-processing ─────────────────────────────
+
+        # Trait drift: record behavioral event
+        try:
+            if hasattr(self, "trait_drift"):
+                self.trait_drift.record(sim_a, item.interaction, valence)
+        except Exception:
+            pass
+
+        # Belief graph: sim_a observes sim_b's reaction
+        try:
+            if hasattr(self, "_observe_interaction"):
+                emotion_b = result.get("emotion_b", "")
+                if emotion_b:
+                    self._observe_interaction(
+                        sim_a, sim_b.sim_id,
+                        "expressed_emotion", emotion_b,
+                        confidence=0.9,
+                    )
+                if valence < -0.4:
+                    self._observe_interaction(
+                        sim_a, sim_b.sim_id,
+                        "reacted_negatively_to", item.interaction,
+                        confidence=0.75,
+                    )
+        except Exception:
+            pass
+
+        # Causal belief update: "action → valence outcome"
+        try:
+            beliefs_a = getattr(sim_a, "beliefs", None)
+            if beliefs_a:
+                outcome = "positive_response" if valence > 0 else "negative_response"
+                beliefs_a.update_causal(
+                    item.interaction, sim_b.sim_id, outcome, valence, confidence=0.6
+                )
+        except Exception:
+            pass
+
+        # Emergence dashboard: record interaction type
+        try:
+            if hasattr(self, "emergence"):
+                self.emergence.record_interaction(item.interaction)
+        except Exception:
+            pass
+
+        # Rumor seed: high-valence events propagate as rumors
+        try:
+            if abs(valence) > 0.7 and hasattr(self, "rumor_network"):
+                self.rumor_network.seed_rumor(
+                    subject_id=sim_b.sim_id,
+                    predicate=item.interaction,
+                    object_=f"valence={valence:.2f}",
+                    origin_id=sim_a.sim_id,
+                    truth=True,
+                    confidence=0.8,
+                    sims=self.sims,
+                )
+        except Exception:
+            pass
+
+        # Capture arc state before buffer/stage advance (used in interaction_resolved emit)
+        _obs_stage_a = getattr(sim_a, "_conversation_stage", "small_talk")
+        _obs_arc_mult = 1.0
+
+        # System 2: update dialogue buffer + advance conversation arc for both sims
         try:
             turn = {
                 "speaker_a": sim_a.name,
@@ -1521,21 +2384,68 @@ class SimEngine:
                 "content_b": result.get("sim_b_reaction", memory_tag)[:100],
                 "emotion_a": emo_a,
                 "emotion_b": emo_b,
+                "valence": valence,
                 "tick": self._tick_count,
             }
             _BUFFER_MAX = 6
-            for sim, partner_id in ((sim_a, sim_b.sim_id), (sim_b, sim_a.sim_id)):
+            for sim, partner_id, partner_sim in (
+                (sim_a, sim_b.sim_id, sim_b),
+                (sim_b, sim_a.sim_id, sim_a),
+            ):
                 if sim._dialogue_partner != partner_id:
                     sim._dialogue_buffer = []
                     sim._dialogue_partner = partner_id
+                    sim._conversation_stage = "small_talk"
+                    sim._conversation_stage_turns = 0
                 sim._dialogue_buffer.append(turn)
                 sim._dialogue_buffer = sim._dialogue_buffer[-_BUFFER_MAX:]
                 sim._dialogue_last_tick = self._tick_count
+
+                # Capture stage before advance for policy learning
+                stage_before = getattr(sim, "_conversation_stage", "small_talk")
+
+                # Personality-adaptive multiplier from arc policy
+                arc_mult = 1.0
+                try:
+                    arc_mult = self.arc_policy.stage_multiplier(
+                        sim, partner_sim, rel, stage_before
+                    )
+                except Exception:
+                    pass
+
+                if sim is sim_a:
+                    _obs_arc_mult = arc_mult
+
+                self._advance_conversation_stage(
+                    sim, partner_id, rel, valence, self._tick_count, arc_mult
+                )
+
+                # Online learning: update arc policy from this interaction
+                try:
+                    self.arc_policy.observe(
+                        sim, partner_sim, rel, stage_before, valence, reward
+                    )
+                except Exception:
+                    pass
         except Exception:
             pass
 
         resolve_fears(sim_a, valence)
         resolve_fears(sim_b, valence)
+        if valence < -0.45:
+            try:
+                from core.knowledge_aspiration import register_knowledge_failure
+
+                if sim_a.profile.get("aspiration") == "Knowledge":
+                    register_knowledge_failure(
+                        sim_a, severity=min(0.8, abs(valence) * 0.6)
+                    )
+                if sim_b.profile.get("aspiration") == "Knowledge":
+                    register_knowledge_failure(
+                        sim_b, severity=min(0.8, abs(valence) * 0.45)
+                    )
+            except Exception:
+                pass
         new_fear = self.wants_engine.check_fear_acquisition(
             sim_a, item.interaction, valence
         )
@@ -1801,17 +2711,72 @@ class SimEngine:
                     sim_a.sim_id,
                     "interaction",
                     {
-                        "with": sim_b.sim_id,
+                        "sim_a": sim_a.name,
+                        "sim_b": sim_b.name,
                         "action": item.interaction,
                         "valence": valence,
-                        "memory": memory_tag,
+                        "friendship_delta": fd,
+                        "romance_delta": rd,
+                        "emotion_a": result.get("emotion_a", ""),
+                        "emotion_b": result.get("emotion_b", ""),
+                        "dialogue": result.get("dialogue", ""),
+                        "sim_b_reaction": result.get("sim_b_reaction", ""),
+                        "memory_tag": memory_tag,
                     },
                 )
             except Exception as exc:
                 logger.warning("Failed to log interaction event: %s", exc)
 
+        # Print live dialogue to stdout
+        import re as _re
+
+        _dialogue = result.get("dialogue", "")
+        _reaction = result.get("sim_b_reaction", "")
+        _ea = result.get("emotion_a", "")
+        _eb = result.get("emotion_b", "")
+        if _dialogue or _reaction:
+            _sign = "+" if valence >= 0 else ""
+            _venue = getattr(self, "_venue", {}).get("name", "")
+            _mood = ":)" if valence >= 0 else ":("
+            print(
+                "\n  -- "
+                + sim_a.name
+                + " & "
+                + sim_b.name
+                + "  ["
+                + item.interaction
+                + "]  "
+                + _venue
+                + "  F"
+                + ("+" if fd >= 0 else "")
+                + str(round(fd, 1))
+                + "  "
+                + _mood,
+                flush=True,
+            )
+            if _dialogue:
+                for _ln in _re.split(r"\s*/\s*", _dialogue.strip()):
+                    _ln = _ln.strip()
+                    if not _ln:
+                        continue
+                    _m = _re.match(r"^(\w+):\s*(.+)$", _ln)
+                    if _m:
+                        _spk = _m.group(1)
+                        _txt = _m.group(2).strip("”'")
+                        _emo = ""
+                        if _spk.lower() == sim_a.name.split()[0].lower() and _ea:
+                            _emo = " [" + _ea + "]"
+                        elif _spk.lower() == sim_b.name.split()[0].lower() and _eb:
+                            _emo = " [" + _eb + "]"
+                        print("    " + _spk + _emo + ": “" + _txt + "”", flush=True)
+                    else:
+                        print("    " + _ln, flush=True)
+            if _reaction:
+                print("    *" + _reaction + "*", flush=True)
+            print(flush=True)
+
         logger.info(
-            "[Tick %d] RESOLVED [%s]: %s → %s (%s) fd=%+.1f rd=%+.1f valence=%.2f",
+            "[Tick %d] RESOLVED [%s]: %s -> %s (%s) fd=%+.1f rd=%+.1f valence=%.2f",
             self._tick_count,
             item.interaction_id,
             sim_a.name,
@@ -2057,12 +3022,22 @@ class SimEngine:
         # Strength scales linearly with friendship above the threshold.
         self._apply_emotional_contagion(sim_a, sim_b, rel)
 
+        try:
+            self.dynasties.on_interaction(self, sim_a, sim_b, item.interaction, valence)
+        except Exception:
+            pass
+
         self._bus.emit(
             "interaction_resolved",
             sim_a=sim_a,
             sim_b=sim_b,
             result=result,
             valence=valence,
+            friendship_delta=fd,
+            romance_delta=rd,
+            stage_before=_obs_stage_a,
+            stage_after=getattr(sim_a, "_conversation_stage", "small_talk"),
+            arc_mult=_obs_arc_mult,
             tick=self._tick_count,
             interaction_id=item.interaction_id,
             interaction=item.interaction,
@@ -2336,13 +3311,246 @@ class SimEngine:
                 sim.control_mode = "autonomous"
             break
 
+    def _run_neural_planning(self, active_only: bool = True) -> None:
+        sims = self.sims
+        if active_only:
+            sims = [
+                s
+                for s in self.sims
+                if s.lod_tier == LODTier.ACTIVE and not getattr(s, "_sleeping", False)
+            ]
+        for sim in sims:
+            plan = self.neural_policy.plan_for_sim(self, sim)
+            if not plan:
+                continue
+            if plan.get("action") == "use_item" and plan.get("object_id") is not None:
+                outcome = self.use_item(sim.sim_id, int(plan["object_id"]))
+                success = bool(outcome.get("ok"))
+                effect = outcome.get("effect", {}) if success else {}
+                restore = float(effect.get("restore", 0.0))
+                reward = (restore * 0.12) + (0.3 if success else -0.35)
+                self.neural_policy.observe(sim, plan, reward, success)
+                if success:
+                    self.neural_policy.stats["uses"] += 1
+
+    def _process_neural_consequences(self) -> None:
+        for evt in self.neural_policy.pop_consequences(limit=24):
+            sim = self._sim_lookup.get(str(evt.get("sim_id", "")))
+            if sim is None:
+                continue
+            typ = str(evt.get("type", ""))
+            intensity = float(evt.get("intensity", 0.3))
+            if typ == "mentorship_opportunity":
+                others = [s for s in self.sims if s.sim_id != sim.sim_id]
+                if others:
+                    target = max(others, key=lambda x: x.skills.levels.get("logic", 0))
+                    self.relationships.get(sim.sim_id, target.sim_id).apply_deltas(
+                        2.0 * intensity, 0.0
+                    )
+                    sim.emotion.add(
+                        "inspired", 0.4, duration=3, source="mentor_opportunity"
+                    )
+                    mentor_knowledge = self.neural_policy.debug_state().get(
+                        "discovered_affordances", {}
+                    )
+                    target.profile.setdefault("known_affordances", {})
+                    for need, types in mentor_knowledge.items():
+                        cur = set(target.profile["known_affordances"].get(need, []))
+                        cur.update(types[:2])
+                        target.profile["known_affordances"][need] = sorted(cur)
+            elif typ == "trust_debt":
+                sim.emotion.add("pride", 0.3, duration=3, source="trust_debt")
+                did = str(getattr(sim, "dynasty_id", "") or "")
+                if did:
+                    d = self.dynasties.dynasties.get(did)
+                    if d:
+                        d.unity = min(100.0, d.unity + 0.8 * intensity)
+            elif typ == "scandal_ripple":
+                did = str(getattr(sim, "dynasty_id", "") or "")
+                if did:
+                    d = self.dynasties.dynasties.get(did)
+                    if d:
+                        d.prestige_points = max(
+                            0.0, d.prestige_points - 0.8 * intensity
+                        )
+                        d.unity = max(0.0, d.unity - 1.2 * intensity)
+            elif typ == "rivalry_escalation":
+                peers = [s for s in self.sims if s.sim_id != sim.sim_id]
+                if peers:
+                    target = random.choice(peers)
+                    self.relationships.get(sim.sim_id, target.sim_id).apply_deltas(
+                        -2.2 * intensity, 0.0
+                    )
+            elif typ == "relationship_milestone":
+                sim.emotion.add(
+                    "hope", 0.35, duration=3, source="relationship_milestone"
+                )
+            elif typ == "memory_bonding":
+                sim.emotion.add("nostalgia", 0.3, duration=3, source="memory_bonding")
+            self._bus.emit(
+                "neural_consequence", sim=sim, payload=evt, tick=self._tick_count
+            )
+
+    def _risk_counterplay_tick(self) -> None:
+        # Ecology loop: if burglar pressure rises, households organically invest in defense.
+        burglar_state = self.burglar.state()
+        recent = burglar_state.get("recent_events", [])
+        unresolved = [
+            e
+            for e in recent
+            if e.get("type") == "burglary_resolved" and e.get("outcome") == "escaped"
+        ]
+        if len(unresolved) < 2:
+            return
+        for sim in self.sims:
+            if sim.simoleons < 300:
+                continue
+            if random.random() < 0.05:
+                # Buy defensive utility when market supports it
+                self.neural_policy._try_store_acquire(self, sim, need="hygiene")
+
+    def _world_event_memory(
+        self,
+        sims: list,
+        tag: str,
+        valence: float = 0.0,
+        gossip: bool = False,
+    ) -> None:
+        participants = [s for s in sims if s is not None]
+        for sim in participants:
+            for other in participants:
+                if sim.sim_id == other.sim_id:
+                    continue
+                try:
+                    self.memory_store.write(
+                        sim.sim_id,
+                        other.sim_id,
+                        tag,
+                        float(valence),
+                        tick=self._tick_count,
+                    )
+                except Exception:
+                    pass
+                try:
+                    rel = self.relationships.get(sim.sim_id, other.sim_id)
+                    rel.shared_memory_count = (
+                        int(getattr(rel, "shared_memory_count", 0)) + 1
+                    )
+                except Exception:
+                    pass
+        if (
+            gossip
+            and len(participants) >= 2
+            and len(self.sims) >= 3
+            and random.random() < 0.55
+        ):
+            spreader = participants[0]
+            receiver = participants[1]
+            pool = [
+                s
+                for s in self.sims
+                if s.sim_id not in {spreader.sim_id, receiver.sim_id}
+            ]
+            if pool:
+                subject = random.choice(pool)
+                self.gossip.learn(receiver.sim_id, subject.sim_id, tag)
+
+    def _witness_micro_effects(self, sim_a: Sim, sim_b: Sim, valence: float) -> None:
+        witnesses = [
+            s
+            for s in self.sims
+            if s.sim_id not in {sim_a.sim_id, sim_b.sim_id}
+            and s.lod_tier == LODTier.ACTIVE
+            and not getattr(s, "_sleeping", False)
+        ]
+        if not witnesses:
+            return
+        sample = random.sample(witnesses, k=min(2, len(witnesses)))
+        for w in sample:
+            if valence >= 0:
+                w.emotion.add(
+                    "warmth", 0.1, duration=2, source="witness_positive_social"
+                )
+                self.relationships.get(w.sim_id, sim_a.sim_id).apply_deltas(0.2, 0.0)
+            else:
+                w.emotion.add(
+                    "unease", 0.12, duration=2, source="witness_negative_social"
+                )
+                self.relationships.get(w.sim_id, sim_a.sim_id).apply_deltas(-0.25, 0.0)
+
+    def _pair_memory_count(self, sim_a_id: str, sim_b_id: str) -> int:
+        key = f"{min(sim_a_id, sim_b_id)}_{max(sim_a_id, sim_b_id)}"
+        store = getattr(self.memory_store, "_store", {})
+        return int(len(store.get(key, [])))
+
     def buy_item(self, sim_id: str, lot_id: str, object_id: int, qty: int = 1) -> dict:
         sim = self._sim_lookup.get(sim_id)
         if sim is None:
             return {"ok": False, "reason": "sim_not_found"}
+        before_bal = float(sim.simoleons)
         ok = self.objects.buy_object(sim, lot_id, int(object_id), int(qty))
         if not ok:
             return {"ok": False, "reason": "buy_failed"}
+        spend = max(0.0, before_bal - float(sim.simoleons))
+        self._emit_economy_event(
+            "economy.purchase",
+            sim_id=sim_id,
+            lot_id=lot_id,
+            object_id=int(object_id),
+            qty=int(qty),
+            spent=round(spend, 2),
+        )
+        plan = getattr(sim, "_neural_plan", None)
+        purchase = plan.get("purchase") if isinstance(plan, dict) else None
+        if (
+            isinstance(plan, dict)
+            and isinstance(purchase, dict)
+            and int(purchase.get("object_id", -1)) == int(object_id)
+        ):
+            self.neural_policy.observe(sim, plan, reward=0.2, success=True)
+
+        # Link economy purchases to placeable home security state.
+        try:
+            inv = list(getattr(sim, "inventory_objects", []))
+            placed = False
+            for item in inv:
+                if int(item.get("id", -1)) != int(object_id):
+                    continue
+                name = str(item.get("name", "")).lower()
+                typ = str(item.get("type", "")).lower()
+                if (
+                    ("alarm" in name)
+                    or ("security" in name)
+                    or typ in {"tool", "weapon", "armor"}
+                ):
+                    home = str(getattr(sim, "household_id", "") or "")
+                    if home:
+                        zone = (
+                            "garage"
+                            if typ in {"tool", "weapon", "armor"}
+                            else "living_room"
+                        )
+                        p = self.lot_layout.place(home, zone, item)
+                        if p.get("ok"):
+                            sim.inventory_objects = [
+                                o
+                                for o in inv
+                                if int(o.get("id", -1)) != int(object_id)
+                                or o is not item
+                            ]
+                            sim.inventory = [o["name"] for o in sim.inventory_objects]
+                            placed = True
+                    break
+            if placed:
+                self._bus.emit(
+                    "object_placed_home",
+                    sim=sim,
+                    lot_id=str(getattr(sim, "household_id", "") or ""),
+                    object_id=int(object_id),
+                    tick=self._tick_count,
+                )
+        except Exception:
+            pass
         self._bus.emit(
             "object_bought",
             sim=sim,
@@ -2383,6 +3591,1286 @@ class SimEngine:
             "simoleons": round(sim.simoleons, 2),
             "inventory_weight": self.objects.inventory_weight(sim),
         }
+
+    def gift_item(
+        self,
+        giver_id: str,
+        receiver_id: str,
+        object_id: int | None = None,
+    ) -> dict:
+        giver = self._sim_lookup.get(giver_id)
+        receiver = self._sim_lookup.get(receiver_id)
+        if giver is None or receiver is None:
+            return {"ok": False, "reason": "sim_not_found"}
+        if giver.sim_id == receiver.sim_id:
+            return {"ok": False, "reason": "same_sim"}
+
+        inv = list(getattr(giver, "inventory_objects", []))
+        if not inv:
+            return {"ok": False, "reason": "empty_inventory"}
+
+        selected: dict[str, Any] | None = None
+        if object_id is not None:
+            for item in inv:
+                if int(item.get("id", -1)) == int(object_id):
+                    selected = dict(item)
+                    break
+        else:
+            best_price = -1.0
+            for item in inv:
+                price = float(item.get("market_price", 0.0))
+                if price > best_price:
+                    best_price = price
+                    selected = dict(item)
+
+        if selected is None:
+            return {"ok": False, "reason": "item_not_found"}
+
+        receiver_inventory = list(getattr(receiver, "inventory_objects", []))
+        receiver_inventory.append(dict(selected))
+        constrained = self.objects._apply_inventory_constraints(
+            receiver, receiver_inventory
+        )
+        if len(constrained) < len(receiver_inventory):
+            return {"ok": False, "reason": "receiver_inventory_full"}
+
+        removed = False
+        kept = []
+        selected_id = int(selected.get("id", -1))
+        for item in giver.inventory_objects:
+            if not removed and int(item.get("id", -1)) == selected_id:
+                removed = True
+                continue
+            kept.append(item)
+        if not removed:
+            return {"ok": False, "reason": "item_not_found"}
+
+        giver.inventory_objects = kept
+        receiver.inventory_objects = constrained
+        giver.inventory = [o["name"] for o in giver.inventory_objects]
+        receiver.inventory = [o["name"] for o in receiver.inventory_objects]
+
+        rel = self.relationships.get(giver.sim_id, receiver.sim_id)
+        affinity_bonus = 4.0
+        interests_a = set(giver.profile.get("interests", []))
+        interests_b = set(receiver.profile.get("interests", []))
+        if interests_a & interests_b:
+            affinity_bonus += 3.0
+        rel.apply_deltas(affinity_bonus, affinity_bonus * 0.2)
+
+        self._bus.emit(
+            "object_gifted",
+            giver=giver,
+            receiver=receiver,
+            object_id=int(selected.get("id", -1)),
+            tick=self._tick_count,
+        )
+        self.dynasties.on_gift(giver, receiver)
+        return {
+            "ok": True,
+            "giver_id": giver_id,
+            "receiver_id": receiver_id,
+            "object": dict(selected),
+        }
+
+    def use_item(self, sim_id: str, object_id: int) -> dict:
+        sim = self._sim_lookup.get(sim_id)
+        if sim is None:
+            return {"ok": False, "reason": "sim_not_found"}
+        result = self.objects.use_object(sim, int(object_id))
+        if not result.get("ok"):
+            return result
+        self._bus.emit(
+            "object_used",
+            sim=sim,
+            object_id=int(object_id),
+            tick=self._tick_count,
+        )
+        self.dynasties.on_item_use(sim, result.get("effect", {}))
+        plan = getattr(sim, "_neural_plan", None)
+        if isinstance(plan, dict) and int(plan.get("object_id", -1)) == int(object_id):
+            restore = float(result.get("effect", {}).get("restore", 0.0))
+            self.neural_policy.observe(
+                sim, plan, reward=0.25 + restore * 0.1, success=True
+            )
+        return {
+            "ok": True,
+            "sim_id": sim_id,
+            "object": result.get("item", {}),
+            "effect": result.get("effect", {}),
+            "simoleons": round(sim.simoleons, 2),
+        }
+
+    def trade_item(
+        self,
+        from_sim_id: str,
+        to_sim_id: str,
+        object_id: int,
+        qty: int = 1,
+        unit_price: float | None = None,
+    ) -> dict:
+        seller = self._sim_lookup.get(from_sim_id)
+        buyer = self._sim_lookup.get(to_sim_id)
+        if seller is None or buyer is None:
+            return {"ok": False, "reason": "sim_not_found"}
+        if seller.sim_id == buyer.sim_id:
+            return {"ok": False, "reason": "same_sim"}
+        if qty <= 0:
+            return {"ok": False, "reason": "invalid_qty"}
+
+        transfers = []
+        for item in getattr(seller, "inventory_objects", []):
+            if int(item.get("id", -1)) == int(object_id):
+                transfers.append(dict(item))
+                if len(transfers) >= qty:
+                    break
+        if len(transfers) < qty:
+            return {"ok": False, "reason": "seller_missing_items"}
+
+        price_each = (
+            float(unit_price)
+            if unit_price is not None
+            else float(transfers[0].get("market_price", 1.0)) * 0.85
+        )
+        total = max(1.0, price_each) * qty
+        if buyer.simoleons < total:
+            return {"ok": False, "reason": "buyer_insufficient_funds"}
+
+        candidate_inventory = list(getattr(buyer, "inventory_objects", [])) + transfers
+        constrained = self.objects._apply_inventory_constraints(
+            buyer, candidate_inventory
+        )
+        if len(constrained) < len(candidate_inventory):
+            return {"ok": False, "reason": "buyer_inventory_full"}
+
+        remaining = []
+        to_remove = qty
+        for item in getattr(seller, "inventory_objects", []):
+            if to_remove > 0 and int(item.get("id", -1)) == int(object_id):
+                to_remove -= 1
+                continue
+            remaining.append(item)
+
+        seller.inventory_objects = remaining
+        buyer.inventory_objects = constrained
+        seller.inventory = [o["name"] for o in seller.inventory_objects]
+        buyer.inventory = [o["name"] for o in buyer.inventory_objects]
+        buyer.simoleons -= total
+        seller.simoleons += total
+        self._emit_economy_event(
+            "economy.trade",
+            seller_id=from_sim_id,
+            buyer_id=to_sim_id,
+            object_id=int(object_id),
+            qty=int(qty),
+            total=round(total, 2),
+        )
+
+        self._bus.emit(
+            "object_traded",
+            seller=seller,
+            buyer=buyer,
+            object_id=int(object_id),
+            qty=int(qty),
+            price=round(total, 2),
+            tick=self._tick_count,
+        )
+        self.dynasties.on_trade(
+            seller, buyer, total, item=transfers[0] if transfers else None
+        )
+        return {
+            "ok": True,
+            "from_sim_id": from_sim_id,
+            "to_sim_id": to_sim_id,
+            "object_id": int(object_id),
+            "qty": int(qty),
+            "total_price": round(total, 2),
+            "seller_simoleons": round(seller.simoleons, 2),
+            "buyer_simoleons": round(buyer.simoleons, 2),
+        }
+
+    def create_contract_loan(
+        self,
+        lender_id: str,
+        borrower_id: str,
+        principal: float,
+        interest_rate: float = 0.05,
+        duration_ticks: int = 40,
+    ) -> dict:
+        out = self.contracts_engine.create_loan(
+            lender_id,
+            borrower_id,
+            float(principal),
+            float(interest_rate),
+            int(duration_ticks),
+            self._tick_count,
+        )
+        if out.get("ok"):
+            self.ledger.record(
+                "contract_created", self._tick_count, {"type": "loan", **out}
+            )
+            # Mirror on-chain: AgreementEngine handles collateral + installments
+            if hasattr(self, "web3"):
+                try:
+                    self.web3.create_loan(
+                        lender_id, borrower_id, float(principal),
+                        float(interest_rate), int(duration_ticks), self._tick_count,
+                    )
+                except Exception as _ce:
+                    logger.debug("[Bridge] loan chain error: %s", _ce)
+        return out
+
+    def create_contract_employment(
+        self,
+        employer_id: str,
+        employee_id: str,
+        wage: float,
+        period_ticks: int = 5,
+        severance: float = 50.0,
+    ) -> dict:
+        out = self.contracts_engine.create_employment(
+            employer_id,
+            employee_id,
+            float(wage),
+            int(period_ticks),
+            float(severance),
+            self._tick_count,
+        )
+        if out.get("ok"):
+            self.ledger.record(
+                "contract_created", self._tick_count, {"type": "employment", **out}
+            )
+            if hasattr(self, "web3"):
+                try:
+                    self.web3.create_employment_contract(
+                        employer_id, employee_id, float(wage),
+                        int(period_ticks), 100, self._tick_count,
+                    )
+                except Exception as _ce:
+                    logger.debug("[Bridge] employment chain error: %s", _ce)
+        return out
+
+    def create_contract_partnership(
+        self,
+        a_id: str,
+        b_id: str,
+        revenue_share: float = 0.2,
+        buyout: float = 10000.0,
+    ) -> dict:
+        out = self.contracts_engine.create_partnership(
+            a_id,
+            b_id,
+            float(revenue_share),
+            float(buyout),
+            self._tick_count,
+        )
+        if out.get("ok"):
+            self.ledger.record(
+                "contract_created", self._tick_count, {"type": "partnership", **out}
+            )
+            # No direct AgreementEngine type for partnership — use loan as proxy
+            if hasattr(self, "web3"):
+                try:
+                    self.web3.create_loan(
+                        a_id, b_id, float(buyout) * 0.1,
+                        float(revenue_share), 200, self._tick_count,
+                    )
+                except Exception as _ce:
+                    logger.debug("[Bridge] partnership chain error: %s", _ce)
+        return out
+
+    def stock_buy(self, sim_id: str, ticker: str, shares: int) -> dict:
+        ok = self.stocks.buy(sim_id, str(ticker).upper(), int(shares), self)
+        if ok:
+            self.ledger.record(
+                "stock_buy",
+                self._tick_count,
+                {
+                    "sim_id": sim_id,
+                    "ticker": str(ticker).upper(),
+                    "shares": int(shares),
+                },
+            )
+        return {"ok": bool(ok)}
+
+    def stock_sell(self, sim_id: str, ticker: str, shares: int) -> dict:
+        ok = self.stocks.sell(sim_id, str(ticker).upper(), int(shares), self)
+        if ok:
+            self.ledger.record(
+                "stock_sell",
+                self._tick_count,
+                {
+                    "sim_id": sim_id,
+                    "ticker": str(ticker).upper(),
+                    "shares": int(shares),
+                },
+            )
+        return {"ok": bool(ok)}
+
+    def token_wallet(self, sim_id: str) -> dict:
+        if sim_id not in self._sim_lookup:
+            return {"ok": False, "reason": "sim_not_found"}
+        return {"ok": True, "sim_id": sim_id, "wallet": self.tokens.wallet(sim_id)}
+
+    def gift_money(
+        self,
+        from_sim_id: str,
+        to_sim_id: str,
+        amount: float,
+        channel: str = "direct",
+    ) -> dict:
+        giver = self._sim_lookup.get(from_sim_id)
+        receiver = self._sim_lookup.get(to_sim_id)
+        if giver is None or receiver is None:
+            return {"ok": False, "reason": "sim_not_found"}
+        if from_sim_id == to_sim_id:
+            return {"ok": False, "reason": "same_sim"}
+        amt = float(amount)
+        if amt <= 0:
+            return {"ok": False, "reason": "invalid_amount"}
+        if float(giver.simoleons) < amt:
+            return {"ok": False, "reason": "insufficient_funds"}
+
+        giver.simoleons -= amt
+        receiver.simoleons += amt
+        self._emit_economy_event(
+            "economy.gift",
+            from_sim_id=from_sim_id,
+            to_sim_id=to_sim_id,
+            amount=round(amt, 2),
+            channel=str(channel),
+        )
+        self._bus.emit(
+            "money_gifted",
+            giver=giver,
+            receiver=receiver,
+            amount=round(amt, 2),
+            channel=str(channel),
+            tick=self._tick_count,
+        )
+        return {
+            "ok": True,
+            "from_sim_id": from_sim_id,
+            "to_sim_id": to_sim_id,
+            "amount": round(amt, 2),
+            "giver_simoleons": round(float(giver.simoleons), 2),
+            "receiver_simoleons": round(float(receiver.simoleons), 2),
+        }
+
+    def property_purchase(
+        self,
+        sim_id: str,
+        venue_type: str,
+        ownership_state: str = "partner",
+        district: str = "central",
+    ) -> dict:
+        self.properties._sim_lookup = self._sim_lookup
+        out = self.properties.purchase_property(
+            sim_id, venue_type, ownership_state, district
+        )
+        if out.get("ok"):
+            self._emit_economy_event(
+                "economy.rent_income",
+                sim_id=sim_id,
+                action="purchase",
+                venue_type=venue_type,
+                property_id=out.get("property_id"),
+                buy_in=out.get("buy_in"),
+            )
+        return out
+
+    def property_collect_income(self, sim_id: str, property_id: str) -> dict:
+        self.properties._sim_lookup = self._sim_lookup
+        out = self.properties.collect_income(sim_id, property_id)
+        if out.get("ok"):
+            self._emit_economy_event(
+                "economy.rent_income",
+                sim_id=sim_id,
+                action="collect",
+                property_id=property_id,
+                collected=out.get("collected"),
+            )
+        return out
+
+    def property_upgrade(self, sim_id: str, property_id: str) -> dict:
+        self.properties._sim_lookup = self._sim_lookup
+        out = self.properties.upgrade_property(sim_id, property_id)
+        if out.get("ok"):
+            self._emit_economy_event(
+                "economy.rent_income",
+                sim_id=sim_id,
+                action="upgrade",
+                property_id=property_id,
+                upgrade_level=out.get("upgrade_level"),
+                cost=out.get("cost"),
+            )
+        return out
+
+    def property_sell(self, sim_id: str, property_id: str) -> dict:
+        self.properties._sim_lookup = self._sim_lookup
+        out = self.properties.sell_property(sim_id, property_id)
+        if out.get("ok"):
+            self._emit_economy_event(
+                "economy.rent_income",
+                sim_id=sim_id,
+                action="sell",
+                property_id=property_id,
+                payout=out.get("payout"),
+            )
+        return out
+
+    def property_manage_employee(
+        self, sim_id: str, property_id: str, action: str, employee_id: str = ""
+    ) -> dict:
+        self.properties._sim_lookup = self._sim_lookup
+        out = self.properties.manage_employee(sim_id, property_id, action, employee_id)
+        if out.get("ok"):
+            self._stock_event(
+                "employee_hire" if action == "hire" else "employee_fire", 1.0
+            )
+            self.ledger.record(
+                "property_employee",
+                self._tick_count,
+                {
+                    "sim_id": sim_id,
+                    "property_id": property_id,
+                    "action": action,
+                    "employee_id": employee_id,
+                },
+            )
+        return out
+
+    def token_market_list(
+        self, owner_id: str, token_id: str, price_simcoin: float
+    ) -> dict:
+        ok = self.tokens.list_item_token(owner_id, token_id, float(price_simcoin))
+        if ok:
+            self.ledger.record(
+                "token_listed",
+                self._tick_count,
+                {
+                    "owner_id": owner_id,
+                    "token_id": token_id,
+                    "price": float(price_simcoin),
+                },
+            )
+        return {"ok": bool(ok)}
+
+    def token_market_cancel(self, owner_id: str, token_id: str) -> dict:
+        ok = self.tokens.cancel_listing(owner_id, token_id)
+        return {"ok": bool(ok)}
+
+    def token_market_buy(self, buyer_id: str, token_id: str) -> dict:
+        ok = self.tokens.buy_listed_token(buyer_id, token_id)
+        if ok:
+            self.ledger.record(
+                "token_sold",
+                self._tick_count,
+                {"buyer_id": buyer_id, "token_id": token_id},
+            )
+            self._queue_chain_intent(
+                "token_market_buy", {"buyer_id": buyer_id, "token_id": token_id}
+            )
+        return {"ok": bool(ok)}
+
+    def token_marketplace(self) -> dict:
+        return {"ok": True, "listings": self.tokens.marketplace()}
+
+    def bookie_refresh(self) -> dict:
+        return self.bookie.refresh_matches()
+
+    def bookie_matches(self) -> dict:
+        return {"ok": True, "matches": list(self.bookie.matches.values())}
+
+    def place_sim_bet(
+        self, sim_id: str, match_id: str, selection: str, stake: float
+    ) -> dict:
+        sim = self._sim_lookup.get(sim_id)
+        if sim is None:
+            return {"ok": False, "reason": "sim_not_found"}
+        amt = float(stake)
+        if amt <= 0:
+            return {"ok": False, "reason": "invalid_stake"}
+        if float(sim.simoleons) < amt:
+            return {"ok": False, "reason": "insufficient_funds"}
+        out = self.bookie.place_bet(
+            bettor_type="sim",
+            bettor_id=sim_id,
+            match_id=match_id,
+            selection=selection,
+            stake=amt,
+            tick=self._tick_count,
+        )
+        if not out.get("ok"):
+            return out
+        sim.simoleons -= amt
+        self.ledger.record(
+            "bookie_bet",
+            self._tick_count,
+            {
+                "bettor_type": "sim",
+                "bettor_id": sim_id,
+                "match_id": match_id,
+                "selection": selection,
+                "stake": round(amt, 2),
+                "odds": out.get("odds"),
+                "bet_id": out.get("bet_id"),
+            },
+        )
+        return {"ok": True, **out, "simoleons": round(float(sim.simoleons), 2)}
+
+    def place_player_bet(
+        self, player_id: str, match_id: str, selection: str, stake: float
+    ) -> dict:
+        pid = str(player_id)
+        amt = float(stake)
+        if amt <= 0:
+            return {"ok": False, "reason": "invalid_stake"}
+        bal = float(self.bookie.player_balances.get(pid, 0.0))
+        if bal < amt:
+            return {
+                "ok": False,
+                "reason": "insufficient_player_balance",
+                "balance": round(bal, 2),
+            }
+        out = self.bookie.place_bet(
+            bettor_type="player",
+            bettor_id=pid,
+            match_id=match_id,
+            selection=selection,
+            stake=amt,
+            tick=self._tick_count,
+        )
+        if not out.get("ok"):
+            return out
+        self.bookie.player_balances[pid] = bal - amt
+        self.ledger.record(
+            "bookie_bet",
+            self._tick_count,
+            {
+                "bettor_type": "player",
+                "bettor_id": pid,
+                "match_id": match_id,
+                "selection": selection,
+                "stake": round(amt, 2),
+                "odds": out.get("odds"),
+                "bet_id": out.get("bet_id"),
+            },
+        )
+        return {
+            "ok": True,
+            **out,
+            "balance": round(self.bookie.player_balances[pid], 2),
+        }
+
+    def player_bookie_fund(self, player_id: str, amount: float) -> dict:
+        pid = str(player_id)
+        amt = max(0.0, float(amount))
+        self.bookie.player_balances[pid] = (
+            float(self.bookie.player_balances.get(pid, 0.0)) + amt
+        )
+        return {
+            "ok": True,
+            "player_id": pid,
+            "balance": round(self.bookie.player_balances[pid], 2),
+        }
+
+    def wallet_nonce(self, sim_id: str, address: str = "") -> dict:
+        """
+        SIWE-compliant challenge for MetaMask.
+        Returns the exact message string to pass to MetaMask personal_sign.
+        """
+        if sim_id not in self._sim_lookup:
+            return {"ok": False, "reason": "sim_not_found"}
+        from blockchain.siwe import create_challenge
+        from blockchain.eip712 import CHAIN_ID
+        addr = address if address else f"0x{'0'*40}"
+        challenge = create_challenge(addr, domain="simchain.game")
+        self.wallet_nonces[sim_id] = challenge["nonce"]
+        return {
+            "ok":        True,
+            "sim_id":    sim_id,
+            "nonce":     challenge["nonce"],
+            "message":   challenge["message"],
+            "expires_at": challenge["expires_at"],
+            "chain_id":  CHAIN_ID,
+        }
+
+    def wallet_link(
+        self,
+        sim_id: str,
+        wallet_address: str,
+        signature: str,
+        chain_id: int = 1,
+        message: str = "",
+        nonce: str = "",
+        auth_user_id: str = "",     # if provided, caller must own this sim
+        auth_store=None,            # AuthStore instance for persistence + ownership check
+    ) -> dict:
+        """
+        Verify a MetaMask SIWE signature and record the MetaMask address as the
+        player's identity for this sim.
+
+        The game wallet (deterministic) is NOT replaced — it keeps signing all
+        automatic game transactions. MetaMask is an identity/consent layer only.
+
+        SIWE mode (preferred): pass `message` + `nonce` from wallet_nonce().
+        Legacy mode: omit message/nonce.
+
+        auth_user_id + auth_store enforce ownership: only the user whose
+        account is bound to this sim_id may link a MetaMask address.
+        """
+        from blockchain.eip712 import CHAIN_ID as SIM_CHAIN_ID
+        if sim_id not in self._sim_lookup:
+            return {"ok": False, "reason": "sim_not_found"}
+
+        # ── Ownership check ───────────────────────────────────────────────────
+        if auth_user_id and auth_store:
+            user = auth_store.get_by_id(auth_user_id)
+            if user is None or user.sim_id != sim_id:
+                return {
+                    "ok": False,
+                    "reason": "forbidden: this sim does not belong to your account",
+                }
+
+        # ── Signature verification ────────────────────────────────────────────
+        recovered = ""
+        if message and nonce:
+            try:
+                from blockchain.siwe import verify_challenge
+                recovered = verify_challenge(nonce, wallet_address, signature, message)
+            except ValueError as exc:
+                return {"ok": False, "reason": str(exc)}
+        else:
+            stored_nonce = self.wallet_nonces.get(sim_id)
+            if not stored_nonce:
+                return {"ok": False, "reason": "nonce_missing — call /wallet/nonce first"}
+            legacy_msg = (
+                f"Link wallet to Sim {sim_id}. Nonce: {stored_nonce}. "
+                f"ChainId: {SIM_CHAIN_ID}"
+            )
+            recovered = self._recover_wallet_address(legacy_msg, signature)
+            if not recovered:
+                return {"ok": False, "reason": "signature_invalid"}
+
+        if recovered.lower() != str(wallet_address).lower():
+            return {
+                "ok": False,
+                "reason": "signature_address_mismatch",
+                "recovered": recovered[:12] + "…",
+            }
+
+        # ── Register MetaMask as identity layer (game wallet unchanged) ───────
+        if hasattr(self, "web3"):
+            ok = self.web3.link_metamask_wallet(sim_id, wallet_address)
+            if not ok:
+                return {"ok": False, "reason": "metamask_address_already_bound_to_another_sim"}
+
+        # ── Persist to auth DB ────────────────────────────────────────────────
+        if auth_store:
+            if auth_user_id:
+                auth_store.link_metamask(auth_user_id, wallet_address)
+            else:
+                # Best-effort: find user by sim_id
+                user = auth_store.get_by_sim_id(sim_id)
+                if user:
+                    auth_store.link_metamask(user.user_id, wallet_address)
+
+        # ── In-memory link record ─────────────────────────────────────────────
+        self.sim_wallet_links[sim_id] = {
+            "wallet_address": str(wallet_address),
+            "chain_id":       SIM_CHAIN_ID,
+            "linked_at_tick": int(self._tick_count),
+        }
+        self.wallet_nonces.pop(sim_id, None)
+
+        self.ledger.record(
+            "wallet_linked",
+            self._tick_count,
+            {
+                "sim_id":         sim_id,
+                "wallet_address": str(wallet_address),
+                "chain_id":       SIM_CHAIN_ID,
+                "method":         "siwe" if message else "legacy",
+            },
+        )
+
+        wallet_info = self.web3.wallet_info(sim_id) if hasattr(self, "web3") else {}
+        return {
+            "ok":             True,
+            "sim_id":         sim_id,
+            "wallet_address": str(wallet_address),
+            "chain_id":       SIM_CHAIN_ID,
+            "game_wallet":    wallet_info.get("game_wallet"),
+            "game_balance_sim": wallet_info.get("game_balance_sim", 0.0),
+        }
+
+    def wallet_unlink(self, sim_id: str) -> dict:
+        if sim_id not in self._sim_lookup:
+            return {"ok": False, "reason": "sim_not_found"}
+        had = self.sim_wallet_links.pop(sim_id, None)
+        if not had:
+            return {"ok": False, "reason": "not_linked"}
+        self.ledger.record("wallet_unlinked", self._tick_count, {"sim_id": sim_id})
+        return {"ok": True, "sim_id": sim_id}
+
+    def wallet_status(self, sim_id: str) -> dict:
+        if sim_id not in self._sim_lookup:
+            return {"ok": False, "reason": "sim_not_found"}
+        return {
+            "ok": True,
+            "sim_id": sim_id,
+            "linked": sim_id in self.sim_wallet_links,
+            "link": self.sim_wallet_links.get(sim_id),
+            "mirror": self.wallet_mirror.get(sim_id, {}),
+        }
+
+    def wallet_set_mirror(
+        self,
+        sim_id: str,
+        native_balance: float = 0.0,
+        simcoin_erc20: float = 0.0,
+        nfts: list[dict] | None = None,
+    ) -> dict:
+        if sim_id not in self._sim_lookup:
+            return {"ok": False, "reason": "sim_not_found"}
+        self.wallet_mirror[sim_id] = {
+            "native_balance": float(native_balance),
+            "simcoin_erc20": float(simcoin_erc20),
+            "nfts": list(nfts or []),
+        }
+        return {"ok": True, "sim_id": sim_id, "mirror": self.wallet_mirror[sim_id]}
+
+    def chain_intents_view(self, limit: int = 100) -> dict:
+        return {"ok": True, "intents": list(self.chain_intents[-max(1, int(limit)) :])}
+
+    def economy_overview(self) -> dict:
+        return {
+            "tick": self._tick_count,
+            "ledger": self.ledger.state(),
+            "contracts": {
+                "stats": self.contracts_engine.stats(),
+                "active": self.contracts_engine.list_contracts(active_only=True),
+            },
+            "stocks": self.stocks.state(),
+            "tokens": self.tokens.state(),
+            "bookie": self.bookie.state(),
+        }
+
+    def sim_portfolio(self, sim_id: str) -> dict:
+        sim = self._sim_lookup.get(sim_id)
+        if sim is None:
+            return {"ok": False, "reason": "sim_not_found"}
+        obligations = self.contracts_engine.obligations_for(sim_id)
+        token_wallet = self.tokens.wallet(sim_id)
+        stock_portfolio = self.stocks.portfolio(sim_id)
+        properties = self.properties.investment_dashboard(sim_id)
+        liquid = float(sim.simoleons)
+        asset_value = float(properties.get("portfolio_value", 0.0)) + float(
+            stock_portfolio.get("value", 0.0)
+        )
+        liability_value = float(obligations.get("total_outstanding", 0.0))
+        net_worth = liquid + asset_value - liability_value
+        normalized = {
+            "sim_id": sim_id,
+            "liquid_simoleons": round(liquid, 2),
+            "token_wallet": token_wallet,
+            "stocks": stock_portfolio,
+            "properties": properties,
+            "contracts": obligations,
+            "asset_value": round(asset_value, 2),
+            "liability_value": round(liability_value, 2),
+            "net_worth": round(net_worth, 2),
+            "wallet_link": self.sim_wallet_links.get(sim_id),
+            "wallet_mirror": self.wallet_mirror.get(sim_id, {}),
+        }
+        setattr(sim, "_portfolio_view", normalized)
+        return {
+            "ok": True,
+            "sim_id": sim_id,
+            "name": sim.name,
+            "portfolio": normalized,
+        }
+
+    def _on_gig_completed_economy(self, **kw: Any) -> None:
+        if not kw.get("success"):
+            return
+        sim = kw.get("sim")
+        if sim is None:
+            return
+        pay = float(kw.get("pay", 0.0))
+        self._emit_economy_event(
+            "economy.contract_settlement",
+            settlement_type="gig",
+            sim_id=sim.sim_id,
+            gig_type=kw.get("gig_type"),
+            label=kw.get("label"),
+            amount=round(pay, 2),
+        )
+
+    def _emit_economy_event(self, event_name: str, **payload: Any) -> None:
+        self._bus.emit(event_name, tick=self._tick_count, **payload)
+
+    def _on_economy_purchase(self, **kw: Any) -> None:
+        self.contracts_engine.observe_economy_event("economy.purchase", kw)
+        self.ledger.record("shop_purchase", self._tick_count, dict(kw))
+        spent = float(kw.get("spent", 0.0))
+        sim_id = str(kw.get("sim_id", ""))
+        if spent > 0:
+            self._stock_event("shop_purchase", max(1.0, spent / 100.0))
+            if sim_id:
+                self.tokens.mint_simcoin(sim_id, max(0.25, spent * 0.01))
+                self._queue_chain_intent("economy_purchase", dict(kw))
+
+    def _on_economy_trade(self, **kw: Any) -> None:
+        self.contracts_engine.observe_economy_event("economy.trade", kw)
+        self.ledger.record("p2p_trade", self._tick_count, dict(kw))
+        seller_id = str(kw.get("seller_id", ""))
+        total = float(kw.get("total", 0.0))
+        if seller_id and total > 0:
+            self.tokens.mint_simcoin(seller_id, max(0.1, total * 0.005))
+            self._queue_chain_intent("economy_trade", dict(kw))
+            seller = self._sim_lookup.get(seller_id)
+            buyer = self._sim_lookup.get(str(kw.get("buyer_id", "")))
+            if seller is not None and buyer is not None:
+                self.dynasties.on_trade(seller, buyer, total, item=None)
+
+    def _on_economy_rent_income(self, **kw: Any) -> None:
+        self.contracts_engine.observe_economy_event("economy.rent_income", kw)
+        ev = str(kw.get("action", ""))
+        self.ledger.record(f"property_{ev or 'event'}", self._tick_count, dict(kw))
+        sim_id = str(kw.get("sim_id", ""))
+        if ev == "purchase":
+            self._stock_event("property_purchase", 1.2)
+            self.tokens.mint_simcoin(
+                sim_id, max(1.0, float(kw.get("buy_in", 0.0)) * 0.003)
+            )
+            pid = str(kw.get("property_id", ""))
+            if sim_id and pid:
+                deed_tid = self.tokens.mint_item_token(
+                    owner_id=sim_id,
+                    item_ref=f"deed:{pid}",
+                    rarity="legendary",
+                    tick=self._tick_count,
+                )
+                self.ledger.record(
+                    "token_minted",
+                    self._tick_count,
+                    {"sim_id": sim_id, "token_id": deed_tid, "kind": "property_deed"},
+                )
+                self._queue_chain_intent(
+                    "mint_property_deed",
+                    {"sim_id": sim_id, "property_id": pid, "token_id": deed_tid},
+                )
+        elif ev == "collect":
+            self.tokens.mint_simcoin(
+                sim_id, max(0.2, float(kw.get("collected", 0.0)) * 0.01)
+            )
+        elif ev == "upgrade":
+            self._stock_event("property_upgrade", 0.8)
+        elif ev == "sell":
+            self._stock_event("property_sell", 1.0)
+
+    def _on_economy_gift(self, **kw: Any) -> None:
+        self.contracts_engine.observe_economy_event("economy.gift", kw)
+        self.ledger.record("money_gift", self._tick_count, dict(kw))
+        giver = self._sim_lookup.get(str(kw.get("from_sim_id", "")))
+        receiver = self._sim_lookup.get(str(kw.get("to_sim_id", "")))
+        if giver is not None and receiver is not None:
+            self.dynasties.on_gift(giver, receiver)
+            self.gossip.learn(receiver.sim_id, giver.sim_id, "gifted_money")
+            self._queue_chain_intent("economy_gift", dict(kw))
+
+    def _on_economy_contract_settlement(self, **kw: Any) -> None:
+        self.contracts_engine.observe_economy_event("economy.contract_settlement", kw)
+        self.ledger.record("contract_event", self._tick_count, dict(kw))
+        amount = float(kw.get("amount", kw.get("payout", 0.0)) or 0.0)
+        sim_id = str(kw.get("sim_id", ""))
+        if sim_id and amount > 0:
+            self.tokens.mint_simcoin(sim_id, max(0.5, amount * 0.02))
+            self._queue_chain_intent("contract_settlement", dict(kw))
+        self._stock_event("contract_settlement", 0.9)
+        self._apply_contract_social_effect(kw, breach=False)
+
+    def _on_economy_contract_breach(self, **kw: Any) -> None:
+        self.contracts_engine.observe_economy_event("economy.contract_breach", kw)
+        self.ledger.record("contract_event", self._tick_count, dict(kw))
+        self._stock_event("contract_breach", 1.0)
+        self._apply_contract_social_effect(kw, breach=True)
+
+    def _apply_contract_social_effect(self, kw: dict[str, Any], breach: bool) -> None:
+        from core.sentiments import add_sentiment
+
+        cid = str(kw.get("contract_id", ""))
+        if not cid:
+            return
+        cmap = {
+            c["contract_id"]: c
+            for c in self.contracts_engine.list_contracts(active_only=False)
+        }
+        c = cmap.get(cid)
+        if not c:
+            return
+        a = self._sim_lookup.get(str(c.get("party_a", "")))
+        b = self._sim_lookup.get(str(c.get("party_b", "")))
+        if a is None or b is None:
+            return
+        rel = self.relationships.get(a.sim_id, b.sim_id)
+        if breach:
+            rel.apply_deltas(-8.0, -2.0)
+            rel.jealousy_score = min(100.0, rel.jealousy_score + 10.0)
+            add_sentiment(rel, "betrayal", self._tick_count, source="contract_breach")
+            add_sentiment(
+                rel, "financial_strain", self._tick_count, source="contract_breach"
+            )
+            a.moodlets.add("betrayed", source="contract_breach")
+            b.moodlets.add("stressed", source="contract_breach")
+            a.reputation_score = max(0.0, a.reputation_score - 0.8)
+            b.reputation_score = max(0.0, b.reputation_score - 0.6)
+            self.gossip.learn(a.sim_id, b.sim_id, "contract_breach")
+        else:
+            age = max(
+                0,
+                int(self._tick_count) - int(c.get("created_tick", self._tick_count)),
+            )
+            if age >= 8:
+                rel.apply_deltas(+2.5, +0.3)
+                add_sentiment(
+                    rel,
+                    "reliable_partner",
+                    self._tick_count,
+                    source="contract_settlement",
+                )
+                a.moodlets.add("proud", source="contract_settlement")
+                b.moodlets.add("grateful", source="contract_settlement")
+                a.reputation_score = min(100.0, a.reputation_score + 0.4)
+                b.reputation_score = min(100.0, b.reputation_score + 0.4)
+
+    def _adjudicate_contract_dispute(self, evt: dict) -> None:
+        cid = str(evt.get("contract_id", ""))
+        if not cid:
+            return
+        contract_map = {
+            c["contract_id"]: c
+            for c in self.contracts_engine.list_contracts(active_only=False)
+        }
+        c = contract_map.get(cid)
+        if not c:
+            return
+        a = self._sim_lookup.get(str(c.get("party_a", "")))
+        b = self._sim_lookup.get(str(c.get("party_b", "")))
+        if a is None or b is None:
+            return
+        system = "You adjudicate contract disputes between sims. Return strict JSON."
+        user_msg = (
+            f"A={a.name} B={b.name} contract={c.get('type')} reason={evt.get('reason', 'breach')} "
+            f"friendship={self.relationships.get(a.sim_id, b.sim_id).friendship:.1f}. "
+            "Resolve fairness and suggest penalties in output fields."
+        )
+        try:
+            result = call_adjudicator(
+                self._llm, system, user_msg, interaction="legal dispute"
+            )
+        except Exception:
+            result = {"valence": -0.4, "reasoning": "fallback"}
+        self.ledger.record(
+            "contract_dispute",
+            self._tick_count,
+            {"contract_id": cid, "reason": evt.get("reason"), "result": result},
+        )
+        valence = float(result.get("valence", -0.3) or -0.3)
+        rel = self.relationships.get(a.sim_id, b.sim_id)
+        rel.apply_deltas(max(-8.0, min(4.0, valence * 6.0)), 0.0)
+        if valence < 0:
+            a.moodlets.add("stressed", source="contract_dispute")
+            b.moodlets.add("stressed", source="contract_dispute")
+        else:
+            a.moodlets.add("proud", source="contract_dispute")
+            b.moodlets.add("grateful", source="contract_dispute")
+
+    def _feed_stock_from_properties(self) -> None:
+        props = list(getattr(self.properties, "_properties", {}).values())
+        if not props:
+            return
+        signal = 0.0
+        for p in props:
+            occ = 1.0 if getattr(p, "employees", []) else 0.7
+            clean = float(getattr(p, "cleanliness", 0.5))
+            svc = float(getattr(p, "service_quality", 0.5))
+            rep = float(getattr(p, "reputation", 0.5))
+            signal += (occ + clean + svc + rep) / 4.0
+        avg = signal / max(1.0, float(len(props)))
+        self._stock_event("property_ops", max(0.1, abs(avg - 0.5) * 2.0))
+
+    def _on_item_crafted_tokenization(self, **kw: Any) -> None:
+        sim = kw.get("sim")
+        if sim is None:
+            return
+        quality = float(kw.get("quality", 0.0))
+        if quality < 0.9:
+            return
+        item_name = str(kw.get("item_name", "crafted_item"))
+        token_id = self.tokens.mint_item_token(
+            owner_id=sim.sim_id,
+            item_ref=f"crafted:{item_name}",
+            rarity="rare",
+            tick=self._tick_count,
+        )
+        self.ledger.record(
+            "token_minted",
+            self._tick_count,
+            {"sim_id": sim.sim_id, "token_id": token_id, "kind": "crafted_rare"},
+        )
+        self._queue_chain_intent(
+            "mint_crafted_item",
+            {"sim_id": sim.sim_id, "item_name": item_name, "token_id": token_id},
+        )
+
+    def _on_burglar_market_shock(self, **kw: Any) -> None:
+        _ = kw
+        self._stock_event("burglary", 1.1)
+
+    def _on_grim_market_shock(self, **kw: Any) -> None:
+        _ = kw
+        self._stock_event("grim_event", 1.2)
+
+    # ── Stock market dual-write helper ───────────────────────────────────────
+
+    # Mapping from engine WorldStockMarket event names → blockchain StockMarket
+    _STOCK_EVENT_MAP: dict[str, str] = {
+        "shop_purchase":      "shop_visit_cafe",
+        "property_purchase":  "property_purchased",
+        "property_upgrade":   "property_purchased",
+        "property_sell":      "property_purchased",
+        "property_ops":       "property_purchased",
+        "contract_settlement":"gig_completed",
+        "contract_breach":    "sim_fired",
+        "burglary":           "high_social",
+        "grim_event":         "illness_outbreak",
+        "career_promotion":   "sim_promoted",
+        "career_fired":       "sim_fired",
+        "marriage":           "sim_married",
+        "divorce":            "sim_divorced",
+        "graduation":         "graduation",
+    }
+
+    # ── Closed-loop cognition helpers ─────────────────────────────────────────
+
+    def _tick_intentions(self) -> None:
+        """Tick intention stacks; generate new goal if sim has none."""
+        from core.intention import maybe_generate_intention
+        for sim in self.sims:
+            stack = getattr(sim, "intentions", None)
+            if stack is None:
+                continue
+            # Find what interaction the sim had this tick (from last pending)
+            last_type = ""
+            for item in self._pending:
+                if item.sim_a_id == sim.sim_id:
+                    last_type = item.interaction
+                    break
+            stack.tick(sim, recent_interaction_type=last_type)
+            # Auto-generate intention when stack is empty
+            if not stack.active_goal() and self._tick_count % 7 == 0:
+                new_goal = maybe_generate_intention(sim, self._tick_count)
+                if new_goal:
+                    new_goal.status = __import__("core.intention", fromlist=["GoalStatus"]).GoalStatus.ACTIVE
+                    stack.push(new_goal)
+
+            # Hard-consequence check on every intention tick
+            if hasattr(self, "hard_consequences"):
+                self.hard_consequences.check_auto_triggers(
+                    sim, self._tick_count, bus=self._bus
+                )
+
+    def _tick_beliefs(self) -> None:
+        """Decay belief confidence; write new observations from resolved interactions."""
+        for sim in self.sims:
+            beliefs = getattr(sim, "beliefs", None)
+            if beliefs:
+                beliefs.decay_tick(self._tick_count)
+
+    def _observe_interaction(
+        self,
+        observer: "Sim",
+        subject_id: str,
+        predicate: str,
+        object_: str,
+        confidence: float = 0.85,
+    ) -> None:
+        """Write a direct observation into an observer's belief graph."""
+        beliefs = getattr(observer, "beliefs", None)
+        if beliefs:
+            from core.beliefs import BeliefSource
+            beliefs.observe(
+                subject_id, predicate, object_,
+                confidence=confidence,
+                source=BeliefSource.OBSERVATION,
+                tick=self._tick_count,
+            )
+
+    def _stock_event(self, event_name: str, magnitude: float = 1.0) -> None:
+        """Dual-write stock events to both WorldStockMarket and blockchain StockMarket."""
+        self.stocks.on_event(event_name, magnitude)
+        chain_event = self._STOCK_EVENT_MAP.get(event_name, "")
+        if chain_event and hasattr(self, "web3"):
+            try:
+                self.web3.on_world_event(chain_event)
+            except Exception:
+                pass
+
+    def _recover_wallet_address(self, message: str, signature: str) -> str:
+        try:
+            from eth_account import Account
+            from eth_account.messages import encode_defunct
+        except Exception:
+            return ""
+        try:
+            msg = encode_defunct(text=message)
+            return str(Account.recover_message(msg, signature=signature))
+        except Exception:
+            return ""
+
+    def _queue_chain_intent(self, intent_type: str, payload: dict) -> None:
+        """Log a chain intent AND actually submit the transaction to the chain."""
+        linked_sim_id = ""
+        for k in ("sim_id", "owner_id", "buyer_id", "from_sim_id"):
+            if payload.get(k):
+                linked_sim_id = str(payload.get(k))
+                break
+        if not linked_sim_id:
+            return
+        link = self.sim_wallet_links.get(linked_sim_id)
+        if not link:
+            return
+        intent = {
+            "tick": int(self._tick_count),
+            "type": str(intent_type),
+            "sim_id": linked_sim_id,
+            "wallet_address": link.get("wallet_address"),
+            "payload": dict(payload),
+        }
+        self.chain_intents.append(intent)
+        self.chain_intents = self.chain_intents[-500:]
+        self.ledger.record("chain_intent", self._tick_count, intent)
+
+        # Actually submit to the chain based on intent_type
+        if not hasattr(self, "web3"):
+            return
+        try:
+            w = self.web3
+            if intent_type == "shop_purchase":
+                w.submit_shop_purchase(
+                    linked_sim_id,
+                    payload.get("shop_name", ""),
+                    payload.get("item", ""),
+                    float(payload.get("cost", 0)),
+                    self._tick_count,
+                )
+            elif intent_type == "stock_buy":
+                w.submit_stock_buy(
+                    linked_sim_id,
+                    payload.get("ticker", ""),
+                    int(payload.get("shares", 0)),
+                )
+            elif intent_type == "stock_sell":
+                w.submit_stock_sell(
+                    linked_sim_id,
+                    payload.get("ticker", ""),
+                    int(payload.get("shares", 0)),
+                )
+            elif intent_type == "loan_create":
+                w.create_loan(
+                    linked_sim_id,
+                    payload.get("borrower_id", ""),
+                    float(payload.get("principal", 0)),
+                    float(payload.get("interest_rate", 0.05)),
+                    int(payload.get("duration_ticks", 50)),
+                    self._tick_count,
+                )
+            elif intent_type in ("transfer", "gift"):
+                to_id = payload.get("to_sim_id", "")
+                if to_id:
+                    w.submit_transfer(
+                        linked_sim_id, to_id,
+                        float(payload.get("amount", 0)),
+                        intent_type,
+                    )
+        except Exception as _ce:
+            logger.debug("[ChainIntent] submit error (%s): %s", intent_type, _ce)
+
+    def resolve_dynamic_threat(self, lot_id: str, threat_tag: str = "burglary") -> dict:
+        """Generic emergent threat response resolver (traits + defensive items)."""
+        return self.burglar.resolve_dynamic_threat_response(self, lot_id, threat_tag)
+
+    def add_sim(self, sim: "Sim") -> bool:
+        """
+        Dynamically add a newly created sim to the running engine.
+
+        Safe to call after __init__ completes — used by the signup flow to
+        inject a player-owned sim without restarting. Returns True on success,
+        False if the sim_id is already registered (duplicate guard).
+        """
+        if sim.sim_id in self._sim_lookup:
+            logger.warning("[Engine] add_sim: sim_id %s already registered", sim.sim_id)
+            return False
+
+        # Core registration
+        self.sims.append(sim)
+        self._sim_lookup[sim.sim_id] = sim
+        self._local_sim_ids.add(sim.sim_id)
+
+        # State back-reference for bridge helpers
+        sim._engine_ref = self
+
+        # Cognition systems
+        from core.intention import IntentionStack
+        from core.beliefs import BeliefGraph
+        if not hasattr(sim, "intentions"):
+            sim.intentions = IntentionStack()
+        if not hasattr(sim, "beliefs"):
+            sim.beliefs = BeliefGraph()
+
+        # Blockchain wallet + initial $SIM mint
+        initial_simoleons = float(getattr(sim, "simoleons", 0.0))
+        self.web3.register_sim(sim.sim_id, initial_simoleons=initial_simoleons)
+
+        # Restore MetaMask identity link from persistent auth store (server restart)
+        try:
+            import importlib
+            _auth_mod = importlib.import_module("server")
+            _auth_store = getattr(_auth_mod, "_auth_store", None)
+            if _auth_store is not None:
+                _auth_user = _auth_store.get_by_sim_id(sim.sim_id)
+                if _auth_user and _auth_user.metamask_address:
+                    self.web3.restore_metamask_link(sim.sim_id, _auth_user.metamask_address)
+                    self.sim_wallet_links[sim.sim_id] = {
+                        "wallet_address": _auth_user.metamask_address,
+                        "chain_id": self.chain.chain_id,
+                        "linked_at_tick": 0,
+                    }
+        except Exception:
+            pass  # no auth store present (e.g. tests, headless mode)
+
+        # Shard assignment (default global until sim moves to a lot)
+        self._shard_manager.assign(sim.sim_id, "global")
+        self._sim_shard_cache[sim.sim_id] = "global"
+
+        # Object inventory seed
+        try:
+            self.objects.assign_sim_inventory(sim)
+        except Exception:
+            pass
+
+        # LOD reassignment will sort this sim into the right tier on next tick
+        from engine.lod import assign_lod_tiers
+        assign_lod_tiers(self.sims)
+
+        logger.info(
+            "[Engine] add_sim: %s (%s) added — total sims=%d",
+            sim.name, sim.sim_id[:8], len(self.sims),
+        )
+        return True
 
     def _assign_coworkers(self) -> None:
         """Group sims by job category and assign them as each other's coworkers."""
@@ -2543,6 +5031,18 @@ class SimEngine:
         context_str: str,
     ) -> str:
         hour = (GAME_START_HOUR + self._tick_count) % 24
+        weather_line = ""
+        try:
+            curw = getattr(self.weather, "current", None)
+            if curw is not None:
+                weather_line = (
+                    f"Weather: {getattr(curw, 'condition', 'clear')} "
+                    f"({getattr(curw, 'temperature', 20)}C)"
+                )
+        except Exception:
+            pass
+        date = self.calendar.date_dict(self._tick_count)
+        date_line = f"Date: day {date.get('day_of_year', 0)} season={date.get('season', 'unknown')}"
         ambient = (
             f"\nAmbient sound: {venue['ambient_sound']}"
             if venue.get("ambient_sound")
@@ -2594,6 +5094,8 @@ class SimEngine:
             f"Intimacy: {venue.get('intimacy', 0)} (0=public, 1=private)\n"
             f"Crowd density: {venue.get('crowd', 0)}\n"
             f"Time of day: {hour:02d}:00{ambient}\n"
+            f"{weather_line}\n"
+            f"{date_line}\n"
             f"{extra_ctx}\n"
             f"=== INTERACTION ===\n"
             f'{sim_a.name} initiated: "{interaction}"\n\n'
@@ -2789,6 +5291,7 @@ class SimEngine:
         ):
             child.milestones.append({"id": "birth", "tick": self._tick_count})
         self.life_states.register_hybrid_offspring(child, parent_a, parent_b)
+        self.dynasties.on_child_born(child, parent_a, parent_b)
         return child
 
     def _run_life_event(
@@ -3101,18 +5604,18 @@ class SimEngine:
             if should_die(sim) and not getattr(sim, "_death_queued", False):
                 sim._death_queued = True
                 logger.info("[DEATH] %s age %d — natural causes", sim.name, new_age)
-                self._queue_death(sim)
+                self._queue_death(sim, cause="old_age")
 
         # Elder extra tick effects (energy drain)
         for sim in self.sims:
             if sim.profile.get("age", 0) >= 60:
                 elder_tick_effects(sim)
 
-    def _queue_death(self, sim: Sim) -> None:
+    def _queue_death(self, sim: Sim, cause: str = "unknown") -> None:
         """Fire the death life event and schedule sim removal."""
         if not hasattr(self, "_death_queue"):
-            self._death_queue: list[str] = []
-        self._death_queue.append(sim.sim_id)
+            self._death_queue: list[tuple[str, str]] = []
+        self._death_queue.append((sim.sim_id, cause))
 
         # Trigger grief in children and closest friends
         from core.arcs import start_grief
@@ -3149,37 +5652,51 @@ class SimEngine:
         )
 
     def _process_deaths(self) -> None:
-        """Remove queued dead sims from the roster."""
+        """Remove queued dead sims from the roster and invoke the Grim Reaper."""
         if not hasattr(self, "_death_queue") or not self._death_queue:
             return
-        for sim_id in self._death_queue:
-            dead_sim = self._sim_lookup.get(sim_id)
-            if dead_sim and random.random() < 0.35:
-                from core.sim import Sim as SimClass
+        for entry in self._death_queue:
+            # Support both old str entries and new (str, cause) tuples
+            if isinstance(entry, tuple):
+                sim_id, cause = entry
+            else:
+                sim_id, cause = entry, "unknown"
 
-                ghost_profile = dict(dead_sim.profile)
-                ghost_profile["id"] = f"ghost_{dead_sim.sim_id}"
-                ghost_profile["name"] = f"{dead_sim.name} (Ghost)"
-                ghost = SimClass(ghost_profile)
-                ghost.is_ghost = True
-                ghost.occult_type = "ghost"
-                death_tag = random.choice(
-                    [
-                        "fire_affinity",
-                        "cold_affinity",
-                        "electric_aura",
-                        "haunting_presence",
-                    ]
+            dead_sim = self._sim_lookup.get(sim_id)
+            if dead_sim:
+                # Grim Reaper arrival + tombstone
+                lot_id = getattr(dead_sim, "household_id", "") or ""
+                grim_result = self.grim_reaper.on_sim_death(
+                    dead_sim, cause, lot_id, self._tick_count
                 )
-                ghost.add_trait(death_tag, source="death")
-                ghost.household_id = dead_sim.household_id
-                ghost.simoleons = 0.0
-                self.sims.append(ghost)
-                self._sim_lookup[ghost.sim_id] = ghost
+                ghost_trait = grim_result.get("ghost_trait", "haunting_presence")
+
+                # Ghost spawning (35% chance, tagged by death cause)
+                if random.random() < 0.35:
+                    from core.sim import Sim as SimClass
+
+                    ghost_profile = dict(dead_sim.profile)
+                    ghost_profile["id"] = f"ghost_{dead_sim.sim_id}"
+                    ghost_profile["name"] = f"{dead_sim.name} (Ghost)"
+                    ghost = SimClass(ghost_profile)
+                    ghost.is_ghost = True
+                    ghost.occult_type = "ghost"
+                    ghost.add_trait(ghost_trait, source="death")
+                    ghost.household_id = dead_sim.household_id
+                    ghost.simoleons = 0.0
+                    self.sims.append(ghost)
+                    self._sim_lookup[ghost.sim_id] = ghost
+
+                logger.info(
+                    "[GRIM] %s (%s) — linger=%s chance=%.0f%%",
+                    dead_sim.name,
+                    cause,
+                    grim_result.get("grim_lingering"),
+                    grim_result.get("linger_chance", 0) * 100,
+                )
 
             self.sims = [s for s in self.sims if s.sim_id != sim_id]
             self._sim_lookup.pop(sim_id, None)
-            # Cancel any pending interactions involving this sim
             self._pending = [
                 p
                 for p in self._pending
@@ -3522,7 +6039,12 @@ class SimEngine:
             ):
                 name = random.choice(list(business_defs.keys()))
                 cfg = business_defs[name]
-                sim.simoleons -= cfg["buy"]
+                _eng = getattr(sim, '_engine_ref', None)
+                if _eng:
+                    from persistence.ledger import TX_BUSINESS_PURCHASE
+                    _eng._tx(sim, -cfg['buy'], TX_BUSINESS_PURCHASE, counterpart=name, description=f'bought {name} business')
+                else:
+                    sim.simoleons -= cfg['buy']
                 sim.owned_businesses.append(name)
             for biz in sim.owned_businesses:
                 cfg = business_defs.get(biz)
@@ -3531,7 +6053,13 @@ class SimEngine:
                 skill_name = str(cfg["skill"])
                 skill_bonus = 1.0 + (sim.skills.levels.get(skill_name, 0) / 35.0)
                 net = cfg["income"] * skill_bonus - cfg["upkeep"]
-                sim.simoleons = max(0.0, sim.simoleons + net)
+                if hasattr(self, '_tx') and net != 0:
+                    from persistence.ledger import TX_BUSINESS_NET
+                    _eng = getattr(sim, '_engine_ref', None)
+                    if _eng: _eng._tx(sim, net, TX_BUSINESS_NET, counterpart=biz, description=f'business net: {biz}')
+                    else: sim.simoleons = max(0.0, sim.simoleons + net)
+                else:
+                    sim.simoleons = max(0.0, sim.simoleons + net)
 
     def _run_education_system(self) -> None:
         hour = (GAME_START_HOUR + self._tick_count) % 24
@@ -3567,9 +6095,23 @@ class SimEngine:
                 + (sim.school_performance / 1200.0)
                 + (sim.skills.levels.get("logic", 0) / 500.0),
             )
+            if sim.profile.get("aspiration") == "Knowledge":
+                try:
+                    from core.knowledge_aspiration import apply_academic_progression
+
+                    apply_academic_progression(sim, hour)
+                except Exception:
+                    pass
 
     def _run_university_system(self) -> None:
-        majors = ["computer science", "fine arts", "biology", "business"]
+        majors = [
+            "computer science",
+            "fine arts",
+            "biology",
+            "business",
+            "mathematics",
+            "physics",
+        ]
         for sim in self.sims:
             age = int(sim.profile.get("age", 25))
             if age < 18:
@@ -3582,8 +6124,29 @@ class SimEngine:
                 and random.random() < 0.06
             ):
                 sim.university_status = "enrolled"
-                sim.degree_track = random.choice(majors)
+                if sim.profile.get("aspiration") == "Knowledge":
+                    try:
+                        from core.knowledge_aspiration import choose_knowledge_major
+
+                        sim.degree_track = choose_knowledge_major(sim, majors)
+                    except Exception:
+                        sim.degree_track = random.choice(majors)
+                else:
+                    sim.degree_track = random.choice(majors)
                 sim.degree_progress = 0.0
+                if sim.profile.get("aspiration") == "Knowledge":
+                    try:
+                        from core.knowledge_aspiration import scholarship_value
+
+                        _eng = getattr(sim, '_engine_ref', None)
+                        _sv = scholarship_value(sim)
+                        if _eng:
+                            from persistence.ledger import TX_SCHOLARSHIP
+                            _eng._tx(sim, _sv, TX_SCHOLARSHIP, description='knowledge aspiration scholarship')
+                        else:
+                            sim.simoleons += _sv
+                    except Exception:
+                        pass
                 sim.emotion.add(
                     "optimism", 0.6, duration=6, source="university admission"
                 )
@@ -3595,11 +6158,26 @@ class SimEngine:
             if sim.homework_progress >= 50:
                 study_gain += 0.15
             sim.degree_progress = min(100.0, sim.degree_progress + study_gain)
-            sim.simoleons = max(0.0, sim.simoleons - 8.0)
+            _eng = getattr(sim, '_engine_ref', None)
+            if _eng:
+                from persistence.ledger import TX_UNIVERSITY_FEE
+                _eng._tx(sim, -8.0, TX_UNIVERSITY_FEE, description='university tuition')
+            else:
+                sim.simoleons = max(0.0, sim.simoleons - 8.0)
 
             if sim.degree_progress >= 100.0:
                 sim.university_status = "graduated"
-                sim.simoleons += 1200
+                _eng = getattr(sim, '_engine_ref', None)
+                if _eng:
+                    from persistence.ledger import TX_CAREER_BONUS
+                    _eng._tx(sim, 12, TX_CAREER_BONUS, description='career branch bonus')
+                else:
+                    _eng = getattr(sim, '_engine_ref', None)
+                if _eng:
+                    from persistence.ledger import TX_GRADUATION_BONUS
+                    _eng._tx(sim, 1200, TX_GRADUATION_BONUS, description='graduation bonus')
+                else:
+                    sim.simoleons += 1200
                 sim.career_performance = min(100.0, sim.career_performance + 10.0)
                 sim.emotion.add("joy", 0.8, duration=8, source="graduation")
 
@@ -3657,7 +6235,12 @@ class SimEngine:
 
             if sim.career_branch in {"startup", "field", "indie", "specialist"}:
                 sim.skills.gain_xp("creativity", 0.04)
-                sim.simoleons += 10
+                _eng = getattr(sim, '_engine_ref', None)
+                if _eng:
+                    from persistence.ledger import TX_CAREER_BONUS
+                    _eng._tx(sim, 10, TX_CAREER_BONUS, description='career branch bonus')
+                else:
+                    sim.simoleons += 10
             elif sim.career_branch in {"enterprise", "lab", "commercial", "management"}:
                 sim.skills.gain_xp("charisma", 0.04)
                 sim.simoleons += 12
@@ -3691,6 +6274,13 @@ class SimEngine:
                     sim.occult_perks = ["quick_channeling"]
                     sim.occult_weaknesses = ["mana_drain"]
                 sim.emotion.add("surprise", 0.7, duration=5, source="occult awakening")
+                if sim.profile.get("aspiration") == "Knowledge":
+                    try:
+                        from core.knowledge_aspiration import apply_occult_curiosity
+
+                        apply_occult_curiosity(sim)
+                    except Exception:
+                        pass
 
             if sim.occult_type == "vampire":
                 sim.occult_power = min(100.0, sim.occult_power + 0.15)
@@ -3709,6 +6299,14 @@ class SimEngine:
                 sim.skills.gain_xp("creativity", 0.03)
                 if random.random() < 0.03:
                     sim.needs.energy = max(0.0, sim.needs.energy - 2.5)
+
+            if sim.profile.get("aspiration") == "Knowledge":
+                try:
+                    from core.knowledge_aspiration import apply_occult_curiosity
+
+                    apply_occult_curiosity(sim)
+                except Exception:
+                    pass
 
             if sim.occult_power >= 35 and len(sim.occult_perks) < 2:
                 if sim.occult_type == "vampire":
@@ -3855,7 +6453,12 @@ class SimEngine:
                 if skill_level >= float(odd_job["difficulty"])
                 else base_payout * 0.6
             )
-            sim.simoleons += payout
+            _eng = getattr(sim, '_engine_ref', None)
+            if _eng:
+                from persistence.ledger import TX_ODD_JOB
+                _eng._tx(sim, payout, TX_ODD_JOB, description='odd job payout')
+            else:
+                sim.simoleons += payout
             sim.odd_job_reputation = min(
                 100.0, sim.odd_job_reputation + (2.0 if payout >= base_payout else 0.8)
             )
@@ -3877,9 +6480,20 @@ class SimEngine:
                 hh.funds = 0.0
                 split = remaining / len(members)
                 for sim in members:
-                    sim.simoleons = max(0.0, sim.simoleons - split)
+                    _eng = getattr(sim, '_engine_ref', None)
+                    if _eng:
+                        from persistence.ledger import TX_HOUSEHOLD_BILL
+                        _eng._tx(sim, -split, TX_HOUSEHOLD_BILL, description='household bill split')
+                    else:
+                        sim.simoleons = max(0.0, sim.simoleons - split)
                     if sim.simoleons < 150:
                         sim.emotion.add("nervousness", 0.5, duration=4, source="bills")
+                self._world_event_memory(
+                    members,
+                    "bills_stress",
+                    valence=-0.2,
+                    gossip=True,
+                )
 
     def _run_calendar_events(self) -> None:
         for sim in self.sims:
@@ -3908,6 +6522,12 @@ class SimEngine:
                 else:
                     rel = self.relationships.get(sender.sim_id, sim.sim_id)
                     rel.apply_deltas(-1.5, 0.0)
+                    self._world_event_memory(
+                        [sender, sim],
+                        "invite_rejected",
+                        valence=-0.25,
+                        gossip=True,
+                    )
             sim.pending_invitations = kept_invites
 
         for evt in self._calendar_events:
@@ -3929,6 +6549,12 @@ class SimEngine:
                     host=host,
                     guest=guest,
                     tick=self._tick_count,
+                )
+                self._world_event_memory(
+                    [host, guest],
+                    f"calendar_{str(evt.get('type', 'hangout'))}",
+                    valence=0.35,
+                    gossip=False,
                 )
             evt["status"] = "completed"
 
@@ -3991,7 +6617,7 @@ class SimEngine:
             sim.hazard_flags["starvation"] = min(1.0, sim._starvation_ticks / 4.0)
             if sim._starvation_ticks >= 4 and not getattr(sim, "_death_queued", False):
                 sim._death_queued = True
-                self._queue_death(sim)
+                self._queue_death(sim, cause="starvation")
                 self._bus.emit(
                     "hazard_event", hazard="starvation", sim=sim, tick=self._tick_count
                 )
@@ -4004,9 +6630,24 @@ class SimEngine:
                 sim._drowning_ticks = max(0, sim._drowning_ticks - 1)
             sim.hazard_flags["drowning"] = min(1.0, sim._drowning_ticks / 4.0)
             if sim._drowning_ticks >= 4:
-                if random.random() < 0.35 and not getattr(sim, "_death_queued", False):
+                defense = (
+                    self.resolve_dynamic_threat(sim.household_id, "drowning")
+                    if getattr(sim, "household_id", None)
+                    else {"used": False}
+                )
+                sim._last_threat_response = {
+                    "tick": self._tick_count,
+                    "hazard": "drowning",
+                    **dict(defense),
+                }
+                saved = bool(defense.get("success", False))
+                if (
+                    (not saved)
+                    and random.random() < 0.35
+                    and not getattr(sim, "_death_queued", False)
+                ):
                     sim._death_queued = True
-                    self._queue_death(sim)
+                    self._queue_death(sim, cause="drowning")
                 else:
                     sim.needs.energy = max(0.0, sim.needs.energy - 18.0)
                     sim.emotion.add("fear", 0.8, duration=4, source="near drowning")
@@ -4037,10 +6678,25 @@ class SimEngine:
                 weather_risk = 0.6
             sim.hazard_flags["weather_extreme"] = weather_risk
             if weather_risk > 0 and random.random() < 0.08:
+                defense = (
+                    self.resolve_dynamic_threat(sim.household_id, "weather_extreme")
+                    if getattr(sim, "household_id", None)
+                    else {"used": False}
+                )
+                sim._last_threat_response = {
+                    "tick": self._tick_count,
+                    "hazard": "weather_extreme",
+                    **dict(defense),
+                }
+                saved = bool(defense.get("success", False))
                 sim.needs.energy = max(0.0, sim.needs.energy - 10.0)
-                if random.random() < 0.18 and not getattr(sim, "_death_queued", False):
+                if (
+                    (not saved)
+                    and random.random() < 0.18
+                    and not getattr(sim, "_death_queued", False)
+                ):
                     sim._death_queued = True
-                    self._queue_death(sim)
+                    self._queue_death(sim, cause="weather_extreme")
                 self._bus.emit(
                     "hazard_event",
                     hazard="weather_extreme",
@@ -4056,11 +6712,26 @@ class SimEngine:
             if electrical_job and sim.needs.energy < 25:
                 elec_risk = 0.35
             if electrical_job and random.random() < 0.01 and sim.needs.energy < 18:
+                defense = (
+                    self.resolve_dynamic_threat(sim.household_id, "electrocution")
+                    if getattr(sim, "household_id", None)
+                    else {"used": False}
+                )
+                sim._last_threat_response = {
+                    "tick": self._tick_count,
+                    "hazard": "electrocution",
+                    **dict(defense),
+                }
+                saved = bool(defense.get("success", False))
                 sim.needs.energy = max(0.0, sim.needs.energy - 25.0)
                 sim.emotion.add("fear", 0.7, duration=3, source="electrocution")
-                if random.random() < 0.22 and not getattr(sim, "_death_queued", False):
+                if (
+                    (not saved)
+                    and random.random() < 0.22
+                    and not getattr(sim, "_death_queued", False)
+                ):
                     sim._death_queued = True
-                    self._queue_death(sim)
+                    self._queue_death(sim, cause="electrocution")
                 self._bus.emit(
                     "hazard_event",
                     hazard="electrocution",
@@ -4124,11 +6795,14 @@ class SimEngine:
 
     def _apply_gift_outcome(self, giver: Sim, receiver: Sim, result: dict) -> None:
         """Apply friendship bonus based on gift interest-match."""
-        if giver.inventory:
-            gifted_item = giver.inventory.pop(0)
-            receiver.inventory.append(gifted_item)
-        else:
-            gifted_item = "thoughtful note"
+        gifted_name = "thoughtful note"
+        if getattr(giver, "inventory_objects", []):
+            outcome = self.gift_item(giver.sim_id, receiver.sim_id)
+            if outcome.get("ok"):
+                gifted_name = str(outcome.get("object", {}).get("name", gifted_name))
+        elif giver.inventory:
+            gifted_name = giver.inventory.pop(0)
+            receiver.inventory.append(gifted_name)
 
         giver_interests = set(giver.profile.get("interests", []))
         receiver_interests = set(receiver.profile.get("interests", []))
@@ -4146,7 +6820,7 @@ class SimEngine:
             "[GIFT] %s→%s item=%s match=%s bonus=+%.1f",
             giver.name,
             receiver.name,
-            gifted_item,
+            gifted_name,
             match,
             bonus,
         )
@@ -4173,6 +6847,9 @@ class SimEngine:
         rel.mentor_of = mentee.sim_id
         mentee.skills.gain_xp(gap_skill, 0.5)
         mentor.skills.gain_xp("charisma", 0.3)
+        if mentor.profile.get("aspiration") == "Knowledge":
+            mentee.skills.gain_xp(gap_skill, 0.2)
+            mentor.emotion.add("pride", 0.4, duration=3, source="knowledge_mentoring")
         rel.apply_deltas(3, 0)
         logger.info(
             "[MENTOR] %s teaches %s +0.5 %s", mentor.name, mentee.name, gap_skill
@@ -4189,5 +6866,6 @@ class SimEngine:
         try:
             if self._tick_count % 10 == 0:
                 self.adaptive_policy.save()
+                self.arc_policy.save()
         except Exception:
             pass

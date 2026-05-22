@@ -279,3 +279,78 @@ class MemoryStore:
                 if top:
                     return "; ".join(e["text"][:120] for e in top)
         return "; ".join(e["text"][:120] for e in entries[-n:])
+
+
+    # ── Salience resurfacing ──────────────────────────────────────────────────
+
+    def salience_score(self, entry: dict, current_tick: int,
+                       trigger_context: dict | None = None) -> float:
+        """
+        Score a memory for retrieval priority.
+
+        Drivers:
+          • recency   — decays exponentially with tick gap
+          • valence   — high positive or negative valence scores higher
+          • witness   — shared memories with a witness present score +0.2
+          • anniversary — if current_tick % created_tick_mod ≈ 0
+          • location  — if current_lot_id matches memory lot
+          • repetition — same tag seen many times → higher salience
+        """
+        tick_gap   = max(1, current_tick - entry.get("tick", 0))
+        recency    = 1.0 / (1 + tick_gap / 50.0)
+        valence    = abs(entry.get("valence", 0.0)) * 0.4
+        base       = recency * 0.5 + valence
+
+        if trigger_context:
+            # Anniversary: memory tick is a multiple of 50 ticks ago
+            created = entry.get("tick", 0)
+            if created > 0 and (current_tick - created) % 50 < 3:
+                base += 0.25
+            # Location match
+            if (entry.get("lot_id")
+                    and entry.get("lot_id") == trigger_context.get("lot_id")):
+                base += 0.20
+            # Witness present in current interaction
+            if (entry.get("sim_b")
+                    and entry.get("sim_b") == trigger_context.get("partner_id")):
+                base += 0.30
+
+        return min(1.0, base)
+
+    def recall_salient(
+        self,
+        sim_a_id: str,
+        sim_b_id: str = "",
+        trigger_context: dict | None = None,
+        current_tick: int = 0,
+        n: int = 3,
+    ) -> str:
+        """
+        Retrieve the most salient memories for sim_a, with optional bias
+        toward memories triggered by location, anniversary, or witness.
+
+        Returns a formatted string ready for adjudicator injection.
+        """
+        # Collect all pair memories for sim_a
+        candidates: list[dict] = []
+        for key, entries in self._store.items():
+            if sim_a_id in key:
+                for entry in entries:
+                    scored = dict(entry)
+                    scored["_salience"] = self.salience_score(
+                        entry, current_tick, trigger_context
+                    )
+                    candidates.append(scored)
+
+        if not candidates:
+            return ""
+
+        top = sorted(candidates, key=lambda e: -e["_salience"])[:n]
+        parts: list[str] = []
+        for e in top:
+            sal = e.get("_salience", 0.0)
+            if sal < 0.2:
+                continue
+            parts.append(f"{e.get('tag','?')} (valence={e.get('valence',0):.1f})")
+
+        return "; ".join(parts) if parts else ""

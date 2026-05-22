@@ -101,6 +101,8 @@ class NeighborhoodSystem:
         self.rentals: dict[str, dict] = {}
         self.hidden_lots: dict[str, dict] = {}
         self.service_npcs: list[dict] = []
+        self.specialization: dict[str, str] = {}
+        self.household_lot_map: dict[str, str] = {}
 
     def _make_world(self) -> WorldNode:
         neighborhoods = []
@@ -160,6 +162,45 @@ class NeighborhoodSystem:
         self._business_sim(engine)
         self._rental_sim(engine)
         self._hidden_lot_unlocks(engine)
+        self._specialization_drift(engine)
+
+    def _specialization_drift(self, engine) -> None:
+        market = getattr(engine, "objects", None)
+        if market is None:
+            return
+        ms = market.market_state()
+        hot = [t for t, _n in ms.get("hot_buy_types", [])[:2]]
+        if not hot:
+            return
+        mapping = {
+            "book": "education",
+            "artifact": "science",
+            "weapon": "security",
+            "alcohol": "nightlife",
+            "medical": "health",
+            "temporary": "retail",
+            "drug": "occult",
+        }
+        for n in self.world.districts[0].neighborhoods:
+            dominant = mapping.get(hot[0], "mixed")
+            self.specialization[n.id] = dominant
+            n.atmosphere = {
+                "education": "quiet",
+                "science": "artsy",
+                "security": "vibrant",
+                "nightlife": "vibrant",
+                "health": "quiet",
+                "retail": "touristy",
+                "occult": "artsy",
+            }.get(dominant, n.atmosphere)
+            if dominant == "occult":
+                n.district_identity["supernatural_presence"] = min(
+                    1.0, n.district_identity["supernatural_presence"] + 0.03
+                )
+            if dominant == "security":
+                n.district_identity["crime"] = max(
+                    0.0, n.district_identity["crime"] - 0.02
+                )
 
     def _assign_lots_to_households(self, engine) -> None:
         res_lots = [
@@ -170,12 +211,24 @@ class NeighborhoodSystem:
         ]
         for hh in engine.households:
             if any(hh.id in l.occupants for l in res_lots):
+                for l in res_lots:
+                    if hh.id in l.occupants:
+                        self.household_lot_map[hh.id] = l.lot_id
+                        break
                 continue
             if not res_lots:
                 break
             lot = random.choice(res_lots)
             if hh.id not in lot.occupants:
                 lot.occupants.append(hh.id)
+            self.household_lot_map[hh.id] = lot.lot_id
+
+        for sim in engine.sims:
+            lot_id = self.household_lot_map.get(
+                str(getattr(sim, "household_id", "") or "")
+            )
+            if lot_id:
+                sim.current_lot_id = lot_id
 
     def _background_sim(self, engine) -> None:
         for sim in engine.sims:
@@ -215,7 +268,12 @@ class NeighborhoodSystem:
                 travel_cost = (
                     0.0 if method in {"walking", "bike"} else random.uniform(1.0, 8.0)
                 )
-                sim.simoleons = max(0.0, sim.simoleons - travel_cost)
+                _eng = getattr(sim, '_engine_ref', None)
+                if _eng:
+                    from persistence.ledger import TX_TRAVEL_COST
+                    _eng._tx(sim, -travel_cost, TX_TRAVEL_COST, description='travel cost')
+                else:
+                    sim.simoleons = max(0.0, sim.simoleons - travel_cost)
                 self.travel_log.append(
                     {
                         "tick": engine.tick_count,
@@ -227,6 +285,7 @@ class NeighborhoodSystem:
                         "travel_cost": round(travel_cost, 2),
                     }
                 )
+                sim.current_lot_id = destination.lot_id
 
     def _service_spawn(self, engine) -> None:
         self.service_npcs.clear()
@@ -271,7 +330,12 @@ class NeighborhoodSystem:
                 )
                 gain = random.uniform(10.0, 60.0)
                 rec["revenue"] += gain
-                sim.simoleons += gain * 0.2
+                _eng = getattr(sim, '_engine_ref', None)
+                if _eng:
+                    from persistence.ledger import TX_NEIGHBORHOOD_BIZ
+                    _eng._tx(sim, gain * 0.2, TX_NEIGHBORHOOD_BIZ, description='neighborhood biz income')
+                else:
+                    sim.simoleons += gain * 0.2
 
     def _rental_sim(self, engine) -> None:
         rental_lots = [
@@ -359,4 +423,5 @@ class NeighborhoodSystem:
             "businesses": dict(self.businesses),
             "rentals": dict(self.rentals),
             "hidden_lots": dict(self.hidden_lots),
+            "specialization": dict(self.specialization),
         }

@@ -71,6 +71,7 @@ class _DummySim:
         self.occult_type = "none"
         self.is_ghost = False
         self.occult_power = 0.0
+        self.perks = set()
 
 
 class _DummyEngine:

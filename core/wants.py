@@ -1,7 +1,13 @@
+from __future__ import annotations
+
 import random
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from sim_types.sim_types import Fear, Want
+from core.knowledge_aspiration import knowledge_fear_from_event, knowledge_wants
+
+if TYPE_CHECKING:
+    from core.sim import Sim
 
 
 class WantsEngine:
@@ -44,9 +50,9 @@ class WantsEngine:
         ],
     }
 
-    def generate(self, sim: "Sim", all_sim_ids: list[str]) -> list[Want]:
+    def generate(self, sim, all_sim_ids: list[str]) -> list[Want]:
         wants: list[Want] = []
-        pressures = sim.needs.pressure_vector()
+        pressures: dict[str, float] = sim.needs.pressure_vector()
         top_need = max(pressures, key=pressures.get)
         if pressures[top_need] > 0.5:
             wants.append(
@@ -69,13 +75,19 @@ class WantsEngine:
                 Want(description, target, need, round(random.uniform(0.4, 0.75), 2))
             )
 
+        if sim.profile.get("aspiration") == "Knowledge":
+            for desc, need, prio in knowledge_wants(sim):
+                target = None
+                if need == "social" and all_sim_ids:
+                    candidates = [sid for sid in all_sim_ids if sid != sim.sim_id]
+                    target = random.choice(candidates) if candidates else None
+                wants.append(Want(desc, target, need, round(float(prio), 2)))
+
         description, need, _ = random.choice(self.SOLO_WANTS)
         wants.append(Want(description, None, need, round(random.uniform(0.2, 0.5), 2)))
         return sorted(wants, key=lambda item: item.priority, reverse=True)
 
-    def check_fear_acquisition(
-        self, sim: "Sim", event: str, valence: float
-    ) -> Optional[Fear]:
+    def check_fear_acquisition(self, sim, event: str, valence: float) -> Optional[Fear]:
         if valence > -0.6:
             return None
         neuroticism = sim.profile["ocean"]["neuroticism"]
@@ -91,4 +103,6 @@ class WantsEngine:
         for keyword, fear in fear_map.items():
             if keyword in event.lower():
                 return fear
+        if sim.profile.get("aspiration") == "Knowledge":
+            return knowledge_fear_from_event(sim, event, valence)
         return None

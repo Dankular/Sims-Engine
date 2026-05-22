@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 from core.traits import trait_compatibility_bonus
+from core.knowledge_aspiration import knowledge_relationship_compatibility
 
 if TYPE_CHECKING:
     from core.sim import Sim
@@ -113,6 +114,7 @@ def attraction_score(sim_a: "Sim", sim_b: "Sim") -> float:
 
     # Trait compatibility/conflict layer
     score += trait_compatibility_bonus(sim_a, sim_b)
+    score += knowledge_relationship_compatibility(sim_a, sim_b)
 
     return max(-1.0, min(1.0, round(score, 3)))
 

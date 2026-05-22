@@ -146,6 +146,11 @@ def _apply_wish_reward(sim: "Sim", wish: LifetimeWish) -> None:
 
     bonus_cash = reward.get("simoleon_bonus", 0)
     if bonus_cash:
+        _eng = getattr(sim, '_engine_ref', None)
+    if _eng:
+        from persistence.ledger import TX_LIFETIME_REWARD
+        _eng._tx(sim, bonus_cash, TX_LIFETIME_REWARD, description='lifetime wish cash bonus')
+    else:
         sim.simoleons += bonus_cash
 
     bonus_rep = reward.get("creative_rep_bonus", 0)

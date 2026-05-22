@@ -48,12 +48,14 @@ from datasets.self_disclosure import load_self_disclosure
 from datasets.adult import (
     load_adult_norms,
     load_literotica_snippets,
+    load_reddit_nsfw_titles,
     load_sensual_speech_patterns,
 )
 from datasets.interests import load_all_interests
 from datasets.loneliness import load_loneliness_index
 from datasets.trauma import load_trauma_index
 from datasets.social_conformity import load_conformity_examples
+from datasets.open_world_actions import load_open_world_action_index
 
 
 @dataclass
@@ -125,12 +127,14 @@ class DatasetRegistry:
     sensual_patterns: list[str] = field(default_factory=list)
     prosocial_nsfw_norms: list[str] = field(default_factory=list)
     literotica_snippets: list[str] = field(default_factory=list)
+    reddit_nsfw_titles: list[str] = field(default_factory=list)
     # ── Interest-specific content (15 interests) ──────────────────────────────
-    interests_data:       dict        = field(default_factory=dict)
+    interests_data: dict = field(default_factory=dict)
     # ── Arc system datasets ────────────────────────────────────────────────────
-    loneliness_index:     dict        = field(default_factory=dict)
-    trauma_index:         dict        = field(default_factory=dict)
-    conformity_examples:  list[dict]  = field(default_factory=list)
+    loneliness_index: dict = field(default_factory=dict)
+    trauma_index: dict = field(default_factory=dict)
+    conformity_examples: list[dict] = field(default_factory=list)
+    open_world_actions: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, workers: int = 4) -> "DatasetRegistry":
@@ -186,15 +190,17 @@ class DatasetRegistry:
             "boru_arcs": load_boru_arcs,
             "self_disclosure_depth": load_self_disclosure,
             # Adult datasets — always loaded; age-gated at interaction selection
-            "sensual_patterns":    load_sensual_speech_patterns,
+            "sensual_patterns": load_sensual_speech_patterns,
             "prosocial_nsfw_norms": load_adult_norms,
             "literotica_snippets": load_literotica_snippets,
+            "reddit_nsfw_titles": load_reddit_nsfw_titles,
             # Interest-specific content for all 15 ungrounded interests
-            "interests_data":      load_all_interests,
+            "interests_data": load_all_interests,
             # Arc system datasets
-            "loneliness_index":    load_loneliness_index,
-            "trauma_index":        load_trauma_index,
+            "loneliness_index": load_loneliness_index,
+            "trauma_index": load_trauma_index,
             "conformity_examples": load_conformity_examples,
+            "open_world_actions": load_open_world_action_index,
         }
         _list_keys_arc = {"conformity_examples"}
         _list_keys = {
@@ -223,6 +229,7 @@ class DatasetRegistry:
             "sensual_patterns",
             "prosocial_nsfw_norms",
             "literotica_snippets",
+            "reddit_nsfw_titles",
         }
         results: dict[str, object] = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
@@ -231,7 +238,9 @@ class DatasetRegistry:
                 try:
                     results[key] = future.result()
                 except Exception:
-                    results[key] = [] if (key in _list_keys or key in _list_keys_arc) else {}
+                    results[key] = (
+                        [] if (key in _list_keys or key in _list_keys_arc) else {}
+                    )
 
         return cls(
             okcupid_essays=results["okcupid_essays"],
@@ -283,10 +292,12 @@ class DatasetRegistry:
             sensual_patterns=results.get("sensual_patterns", []),
             prosocial_nsfw_norms=results.get("prosocial_nsfw_norms", []),
             literotica_snippets=results.get("literotica_snippets", []),
+            reddit_nsfw_titles=results.get("reddit_nsfw_titles", []),
             interests_data=results.get("interests_data", {}),
             loneliness_index=results.get("loneliness_index", {}),
             trauma_index=results.get("trauma_index", {}),
             conformity_examples=results.get("conformity_examples", []),
+            open_world_actions=results.get("open_world_actions", {}),
         )
 
 

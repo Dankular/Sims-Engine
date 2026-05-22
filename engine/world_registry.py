@@ -51,6 +51,9 @@ class RemoteSimStub:
         self._dialogue_buffer: list = []
         self._dialogue_partner: str = ""
         self._dialogue_last_tick: int = -999
+        self._conversation_stage: str = "small_talk"
+        self._conversation_stage_turns: int = 0
+        self._consent_state: dict = {}
         self._low_energy_ticks: int = 0
         self._action_cooldowns: dict[str, int] = {}
         self._active_goal = None

@@ -227,7 +227,12 @@ class SkillClassSystem:
         attendees = random.sample(engine.sims, k=min(5, len(engine.sims)))
         engagement = 0.5 + host.skills.levels.get("charisma", 0.0) / 20.0
         payout = max(0.0, 30.0 * engagement)
-        host.simoleons += payout
+        _eng = getattr(host, "_engine_ref", None)
+        if _eng:
+            from persistence.ledger import TX_SKILL_CLASS_HOST
+            _eng._tx(host, payout, TX_SKILL_CLASS_HOST, description="skill class host fee")
+        else:
+            host.simoleons += payout
         host.reputation_score = min(100.0, host.reputation_score + 0.5)
         self.lecture_history.append(
             {

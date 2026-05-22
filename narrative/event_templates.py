@@ -714,6 +714,11 @@ def _inheritance_received(primary_id: str, secondary_ids: list[str], engine: "Si
     amount = extra.get("amount", 500.0)
     sim = engine._sim_lookup.get(primary_id)
     if sim:
+        _eng = getattr(sim, '_engine_ref', None)
+    if _eng:
+        from persistence.ledger import TX_INHERITANCE
+        _eng._tx(sim, amount, TX_INHERITANCE, description='inheritance received')
+    else:
         sim.simoleons += amount
     c.emotions.append((primary_id, "grief",    0.6, 10))
     c.emotions.append((primary_id, "grateful", 0.5,  8))

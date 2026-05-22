@@ -196,7 +196,14 @@ class CraftingEngine:
         inventory = getattr(sim, "crafted_inventory", [])
         for item in inventory:
             if item.item_type == "manuscript" and item.published and not item.consumed:
-                sim.simoleons += item.royalty_per_tick
+                _eng = getattr(sim, "_engine_ref", None)
+                if _eng:
+                    from persistence.ledger import TX_CRAFTING_ROYALTY
+                    _eng._tx(sim, item.royalty_per_tick, TX_CRAFTING_ROYALTY,
+                             counterpart=item.item_id,
+                             description=f"manuscript royalty: {item.name}")
+                else:
+                    sim.simoleons += item.royalty_per_tick
 
     @staticmethod
     def sell_item(sim: "Sim", item_id: str, engine: "SimEngine") -> float:
@@ -205,7 +212,13 @@ class CraftingEngine:
         for item in inventory:
             if item.item_id == item_id and not item.consumed:
                 item.consumed = True
-                sim.simoleons += item.sell_value
+                if hasattr(engine, "_tx"):
+                    from persistence.ledger import TX_CRAFTING_SALE
+                    engine._tx(sim, item.sell_value, TX_CRAFTING_SALE,
+                               counterpart=item.item_id,
+                               description=f"sold crafted item: {item.name}")
+                else:
+                    sim.simoleons += item.sell_value
                 sim.emotion.add("joy", 0.5, duration=3, source="sold_item")
                 engine._bus.emit("item_sold", sim=sim, item=item, tick=engine.tick_count)
                 return item.sell_value

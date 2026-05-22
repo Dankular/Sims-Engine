@@ -77,6 +77,10 @@ class AspirationSystem:
 
     def tick(self, sim, engine, current_tick: int) -> None:
         self.bootstrap(sim)
+        if sim.lifetime_aspiration.id == "Knowledge":
+            from core.knowledge_aspiration import apply_knowledge_tick
+
+            apply_knowledge_tick(sim, engine, current_tick)
         self._dynamic_discovery(sim, engine)
         self._autonomy_bias(sim)
         self._fulfillment_update(sim)
@@ -196,7 +200,12 @@ class AspirationSystem:
             asp.completion_state = True
             sim.completed_aspirations.append(asp.id)
             sim.reward_traits.add("emotional_resilience")
-            sim.simoleons += 1000.0
+            _eng = getattr(sim, '_engine_ref', None)
+            if _eng:
+                from persistence.ledger import TX_LIFETIME_REWARD
+                _eng._tx(sim, 1000.0, TX_LIFETIME_REWARD, description='aspiration reward')
+            else:
+                sim.simoleons += 1000.0
             sim.reputation_score = min(100.0, sim.reputation_score + 2.0)
             sim.emotion.add(
                 "pride", 0.9, duration=12, source=f"aspiration_complete:{asp.id}"

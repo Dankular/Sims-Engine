@@ -121,7 +121,15 @@ class GigManager:
             return  # still working
 
         # Gig completed
-        sim.simoleons += gig.pay
+        _eng = getattr(sim, "_engine_ref", None)
+        if _eng:
+            from persistence.ledger import TX_GIG_PAYOUT
+            _eng._tx(sim, gig.pay, TX_GIG_PAYOUT,
+                     counterpart=str(gig.gig_type),
+                     description=f"gig payout: {gig.label}",
+                     metadata={"gig_id": gig.gig_id, "gig_type": gig.gig_type})
+        else:
+            sim.simoleons += gig.pay
         sim.skills.gain_xp(gig.required_skill, gig.xp_reward)
         sim.career_performance = min(100, sim.career_performance + 3)
         sim.active_gig = None

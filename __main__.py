@@ -6,7 +6,6 @@ Usage:
     python -m sim_v2 --sims 5              # 5 sims
     python -m sim_v2 --ticks 20            # 20 ticks
     python -m sim_v2 --profile             # print one profile as JSON and exit
-    python -m sim_v2 --backend ollama      # use Ollama HTTP backend
     python -m sim_v2 --backend llama-server --llama-url http://127.0.0.1:8080/v1/chat/completions
     python -m sim_v2 --dry-run             # 2 sims, 1 tick, no delay (smoke test)
     python -m sim_v2 --update              # clear dataset cache and re-download
@@ -48,12 +47,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--backend",
-        default="ollama",
-        choices=["llama-cpp", "ollama", "llama-server"],
-        help="LLM backend (default: ollama)",
+        default="llama-server",
+        choices=["llama-cpp", "llama-server", "mock"],
+        help="LLM backend (default: llama-server)",
     )
-    p.add_argument("--ollama-model", default=None, help="Ollama model name")
-    p.add_argument("--ollama-url", default=None, help="Ollama API URL")
     p.add_argument("--llama-url", default=None, help="llama-server OpenAI-compat URL")
     p.add_argument("--llama-model", default=None, help="Model id sent to llama-server")
     p.add_argument(
@@ -174,6 +171,11 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=25,
         help="Max rows printed by --list-voices (default: 25)",
+    )
+    p.add_argument(
+        "--no-restore",
+        action="store_true",
+        help="Ignore persisted snapshot and start a fresh world",
     )
     # ── Network / NATS ────────────────────────────────────────────────────────
     p.add_argument(
@@ -355,23 +357,18 @@ def main() -> None:
         return
 
     # Apply backend env overrides before creating the backend
-    if args.ollama_model:
-        os.environ["SIM_V2_OLLAMA_MODEL"] = args.ollama_model
-    if args.ollama_url:
-        os.environ["SIM_V2_OLLAMA_URL"] = args.ollama_url
     if args.llama_url:
         os.environ["SIM_V2_LLAMA_SERVER_URL"] = args.llama_url
     if args.llama_model:
         os.environ["SIM_V2_LLAMA_SERVER_MODEL"] = args.llama_model
     if args.llm_timeout:
-        os.environ.setdefault("SIM_V2_OLLAMA_TIMEOUT", str(args.llm_timeout))
         os.environ.setdefault("SIM_V2_LLAMA_SERVER_TIMEOUT", str(args.llm_timeout))
     # Adult datasets always loaded; age-gated at interaction selection (sim.age >= 16)
 
     # llama-cpp downloads the GGUF at construction time — skip for dry-run
     if args.dry_run and args.backend == "llama-cpp":
-        args.backend = "ollama"
-        print("[INFO] dry-run: switched backend to ollama to skip GGUF download\n")
+        args.backend = "mock"
+        print("[INFO] dry-run: switched backend to mock to skip GGUF download\n")
 
     from llm.backend import create_backend
 
@@ -405,30 +402,44 @@ def main() -> None:
         attach,
     )
 
-    print(f"[INFO] Generating {args.sims} sim profiles...\n")
+    # Persistence layer
+    from persistence.sqlite import PersistenceLayer
+
+    db = PersistenceLayer()
+    snapshot = None if args.no_restore else db.load_state()
+
     sims: list[Sim] = []
-    for _ in range(args.sims):
-        profile = generate_sim_profile(okcupid_essays=essays or None)
-        sim = Sim(profile)
-        sims.append(sim)
-        print_sim_profile(sim)
+    if snapshot and snapshot.get("sims"):
+        for sim_state in snapshot.get("sims", []):
+            profile = sim_state.get("profile")
+            if isinstance(profile, dict) and profile.get("id"):
+                sims.append(Sim(profile))
+        if sims:
+            print(
+                f"[INFO] Restored snapshot with {len(sims)} sims at tick {snapshot.get('tick', 0)}.\n"
+            )
+
+    if not sims:
+        print(f"[INFO] Generating {args.sims} sim profiles...\n")
+        for _ in range(args.sims):
+            profile = generate_sim_profile(okcupid_essays=essays or None)
+            sim = Sim(profile)
+            sims.append(sim)
+            print_sim_profile(sim)
 
     # Assign households
     from world.households import assign_households
 
     households = assign_households(sims)
-    print(f"\n[INFO] {len(households)} household(s) created.")
-
-    # Persistence layer
-    from persistence.sqlite import PersistenceLayer
-
-    db = PersistenceLayer()
+    print(f"\n[INFO] {len(households)} household(s) ready.")
 
     # Build and wire engine
     from engine.engine import SimEngine
 
     engine = SimEngine(sims=sims, llm=llm, datasets=datasets, db=db)
     engine.households = households
+    if snapshot and snapshot.get("sims"):
+        db.restore_engine(engine, snapshot)
     attach(engine)
 
     # ── NATS distributed network (optional) ──────────────────────────────────

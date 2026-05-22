@@ -41,6 +41,7 @@ SENTIMENT_CATALOGUE: dict[str, SentimentDef] = {
     "reconciled": SentimentDef(+0.7, 200, unlocks=["confide", "hug"]),
     "childhood_bond": SentimentDef(+0.6, -1, unlocks=["share memory", "confide"]),
     "gratitude": SentimentDef(+0.7, 100, unlocks=["express gratitude"]),
+    "reliable_partner": SentimentDef(+0.8, 220, unlocks=["confide", "plan together"]),
     # ── Negative ──────────────────────────────────────────────────────────────
     "betrayal": SentimentDef(
         -1.0, 200, blocks=["share secret", "confide", "express love"]
@@ -63,6 +64,9 @@ SENTIMENT_CATALOGUE: dict[str, SentimentDef] = {
         -1.0, -1, blocks=["flirt", "kiss", "hold hands", "express love"]
     ),
     "lied_to_me": SentimentDef(-0.8, 180, blocks=["confide", "share secret"]),
+    "financial_strain": SentimentDef(
+        -0.7, 180, blocks=["invest together", "share secret"]
+    ),
 }
 
 
