@@ -435,6 +435,30 @@ class SimEngine:
 
         logger.info("[Engine] Closed-loop cognition systems initialised")
 
+        # ── Civilization-layer systems ─────────────────────────────────────────
+        from world.macro_economy import MacroEconomy
+        from world.factions import FactionManager
+        from engine.spatial import TravelSystem
+        from world.history import WorldChronicle
+        from world.demographics import DemographicEngine
+        from world.social_class import SocialClassSystem
+        from world.job_market import JobMarket
+        from world.politics import PoliticalSystem
+        from world.civilization import CivilizationSystem
+
+        self.macro_economy  = MacroEconomy()
+        self.factions       = FactionManager()
+        self.spatial        = TravelSystem()
+        self.world_history  = WorldChronicle()
+        self.demographics   = DemographicEngine()
+        self.social_class   = SocialClassSystem()
+        self.job_market     = JobMarket()
+        self.politics       = PoliticalSystem()
+        self.civilization   = CivilizationSystem()
+
+        logger.info("[Engine] Civilization-layer systems initialised "
+                    "(macro/factions/spatial/history/demographics/class/jobs/politics/civilization)")
+
     # ── Unified financial transaction method ─────────────────────────────────
     #
     # _tx() is the SINGLE correct way to change sim.simoleons.
@@ -804,6 +828,15 @@ class SimEngine:
         self.neighborhoods.tick(self)
         self.stocks.tick(self)
 
+        # Civilization-layer systems
+        self.macro_economy.tick(self)
+        self.factions.tick(self)
+        self.spatial.tick(self)
+        self.world_history.tick(self)
+        self.demographics.tick(self)
+        self.social_class.tick(self)
+        self.job_market.tick(self)
+
         contract_events = self.contracts_engine.tick(self)
         for evt in contract_events:
             evt_type = str(evt.get("type", "contract_event"))
@@ -860,6 +893,8 @@ class SimEngine:
 
         self.clubs.tick(self)
         self.social_events.tick(self)
+        self.politics.tick(self)
+        self.civilization.tick(self)
 
         from narrative.marriage import check_divorces
         check_divorces(self)
@@ -1297,6 +1332,15 @@ class SimEngine:
             "stocks": self.stocks.state(),
             "tokens": self.tokens.state(),
             "bookie": self.bookie.state(),
+            "macro_economy": self.macro_economy.summary(),
+            "factions": self.factions.summary(),
+            "spatial": self.spatial.summary(),
+            "world_history": self.world_history.summary(),
+            "demographics": self.demographics.summary(),
+            "social_class": self.social_class.mobility_summary(),
+            "job_market": self.job_market.summary(),
+            "politics": self.politics.summary(),
+            "civilization": self.civilization.summary(),
         }
 
     def list_pet_catalog(self) -> list[dict]:
@@ -2569,6 +2613,15 @@ class SimEngine:
 
         # ── Drama cascade ─────────────────────────────────────────────────────
         self.drama.on_resolved(sim_a, sim_b, valence, item.interaction, self)
+
+        # ── Civilization: research/culture from interaction type ───────────────
+        try:
+            if hasattr(self, "civilization"):
+                self.civilization.on_interaction_resolved(
+                    item.interaction, sim_a, sim_b, valence
+                )
+        except Exception:
+            pass
 
         # ── Moodlet generation from interaction outcomes ───────────────────────
         interaction_lower = item.interaction.lower()

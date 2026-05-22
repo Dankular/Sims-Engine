@@ -39,6 +39,15 @@ class GoalType(str, Enum):
     BUY_PROPERTY       = "buy_property"
     HAVE_CHILD         = "have_child"
     MAKE_AMENDS        = "make_amends"
+    # Extended ambition goals
+    BECOME_FAMOUS      = "become_famous"
+    BUILD_EMPIRE       = "build_empire"
+    DESTROY_RIVAL      = "destroy_rival"
+    FORM_FACTION       = "form_faction"
+    ACHIEVE_MASTERY    = "achieve_mastery"
+    GAIN_POLITICAL_POWER = "gain_political_power"
+    LEAVE_LEGACY       = "leave_legacy"
+    FIND_PURPOSE       = "find_purpose"
 
 
 class GoalStatus(str, Enum):
@@ -252,13 +261,96 @@ def make_skill_goal(skill: str, target_level: int, priority: float = 0.5) -> Goa
     )
 
 
+def make_fame_goal(priority: float = 0.7) -> Goal:
+    return Goal(
+        goal_type=GoalType.BECOME_FAMOUS,
+        priority=priority,
+        deadline_ticks=200,
+        subgoals=[
+            SubGoal("build reputation", "social", "",
+                    lambda s: s.reputation_score >= 40),
+            SubGoal("become celebrity", "social", "",
+                    lambda s: s.reputation_score >= 70),
+        ],
+    )
+
+
+def make_empire_goal(target_properties: int = 3, priority: float = 0.65) -> Goal:
+    return Goal(
+        goal_type=GoalType.BUILD_EMPIRE,
+        target_value=float(target_properties),
+        priority=priority,
+        deadline_ticks=300,
+        subgoals=[
+            SubGoal("earn capital", "activity", "",
+                    lambda s: s.simoleons >= 1000),
+            SubGoal("acquire assets", "activity", "",
+                    lambda s: s.simoleons >= 3000),
+        ],
+    )
+
+
+def make_rival_goal(target_id: str, priority: float = 0.85) -> Goal:
+    return Goal(
+        goal_type=GoalType.DESTROY_RIVAL,
+        target_sim_id=target_id,
+        priority=priority,
+        deadline_ticks=150,
+        subgoals=[
+            SubGoal("spread rumors", "conflict", target_id,
+                    lambda s: True),
+            SubGoal("undermine rival", "conflict", target_id,
+                    lambda s: True),
+        ],
+    )
+
+
+def make_mastery_goal(skill: str, target_level: int = 8, priority: float = 0.6) -> Goal:
+    mid_level = max(1, target_level // 2)
+    return Goal(
+        goal_type=GoalType.ACHIEVE_MASTERY,
+        target_value=float(target_level),
+        priority=priority,
+        deadline_ticks=250,
+        subgoals=[
+            SubGoal(f"study {skill}", "activity", "",
+                    lambda s, sk=skill, lv=mid_level:
+                        s.skills.levels.get(sk, 0) >= lv),
+            SubGoal(f"master {skill}", "activity", "",
+                    lambda s, sk=skill, lv=target_level:
+                        s.skills.levels.get(sk, 0) >= lv),
+        ],
+    )
+
+
+def make_legacy_goal(priority: float = 0.5) -> Goal:
+    return Goal(
+        goal_type=GoalType.LEAVE_LEGACY,
+        priority=priority,
+        deadline_ticks=150,
+        subgoals=[
+            SubGoal("mentor successor", "mentor", "",
+                    lambda s: getattr(s, "mentorship_count", 0) >= 3),
+            SubGoal("leave inheritance", "activity", "",
+                    lambda s: s.simoleons >= 2000),
+        ],
+    )
+
+
 def maybe_generate_intention(sim: "Sim", tick: int) -> Goal | None:
     """
     Heuristically generate a new intention for a sim based on current state.
     Called by the engine every N ticks when the sim has no active goal.
+
+    Priority order:
+      1. Hard need-based triggers (social isolation, bankruptcy, grief)
+      2. OCEAN personality-driven ambitions
+      3. Life-stage milestones
+      4. Relationship-state triggers
+      5. Career ambition fallback
     """
+    # ── 1. Urgent need-based triggers ─────────────────────────────────────────
     if sim.needs.social < 20:
-        # Lonely → seek connection
         return Goal(
             goal_type=GoalType.BUILD_FRIENDSHIP,
             priority=0.75,
@@ -268,6 +360,7 @@ def maybe_generate_intention(sim: "Sim", tick: int) -> Goal | None:
         )
     if sim.simoleons < 200:
         return make_save_goal(500.0, priority=0.9)
+
     if sim.grief_stage in (1, 2):
         return Goal(
             goal_type=GoalType.MAKE_AMENDS,
@@ -276,7 +369,95 @@ def maybe_generate_intention(sim: "Sim", tick: int) -> Goal | None:
             subgoals=[SubGoal("seek comfort", "support", "",
                               lambda s: s.grief_stage <= 0)],
         )
-    # Career ambition when performing well
+
+    # Damaged reputation → repair social standing
+    if sim.reputation_score < -20:
+        return make_repair_goal("", priority=0.8)
+
+    # ── 2. OCEAN personality-driven ambitions ──────────────────────────────────
+    ocean: dict = sim.profile.get("ocean", {})
+
+    if ocean.get("openness", 0.5) > 0.7 and random.random() < 0.30:
+        skill_levels: dict = getattr(sim.skills, "levels", {})
+        best_skill = max(skill_levels, key=lambda sk: skill_levels[sk]) if skill_levels else "charisma"
+        return make_mastery_goal(best_skill)
+
+    if ocean.get("conscientiousness", 0.5) > 0.7:
+        if sim.simoleons < 500:
+            return make_save_goal(500.0, priority=0.65)
+        else:
+            return make_empire_goal()
+
+    if ocean.get("extraversion", 0.5) > 0.65 and sim.reputation_score < 30:
+        return make_fame_goal()
+
+    if ocean.get("agreeableness", 0.5) > 0.7:
+        rels = getattr(sim, "relationships", {})
+        for other_id, rel in rels.items():
+            friendship = rel.friendship if hasattr(rel, "friendship") else rel.get("friendship", 0)
+            if friendship < -20:
+                return make_repair_goal(other_id, priority=0.75)
+
+    if ocean.get("neuroticism", 0.5) > 0.65:
+        return make_save_goal(max(500.0, sim.simoleons * 1.5), priority=0.7)
+
+    # ── 3. Life-stage milestones ───────────────────────────────────────────────
+    age: int = sim.profile.get("age", 25)
+
+    if 13 <= age <= 17:
+        if random.random() < 0.40:
+            if random.random() < 0.5:
+                return Goal(
+                    goal_type=GoalType.BUILD_FRIENDSHIP,
+                    priority=0.7,
+                    deadline_ticks=100,
+                    subgoals=[SubGoal("make friends", "friendly", "",
+                                     lambda s: s.needs.social >= 70)],
+                )
+            else:
+                return make_skill_goal("charisma", 3, priority=0.6)
+
+    elif 18 <= age <= 25:
+        if random.random() < 0.30:
+            if random.random() < 0.5:
+                return make_fame_goal(priority=0.65)
+            else:
+                return make_save_goal(1000.0, priority=0.6)
+
+    elif 26 <= age <= 59:
+        if sim.career_performance > 70 and random.random() < 0.25:
+            return Goal(
+                goal_type=GoalType.CAREER_ADVANCE,
+                priority=0.6,
+                deadline_ticks=100,
+                subgoals=[SubGoal("excel at work", "intellectual", "",
+                                  lambda s: s.career_performance >= 90)],
+            )
+        rels = getattr(sim, "relationships", {})
+        for other_id, rel in rels.items():
+            friendship = rel.friendship if hasattr(rel, "friendship") else rel.get("friendship", 0)
+            if friendship < -40:
+                return make_rival_goal(other_id)
+
+    elif age >= 60:
+        return make_legacy_goal()
+
+    # ── 4. Relationship-state triggers ────────────────────────────────────────
+    rels = getattr(sim, "relationships", {})
+    married = getattr(sim, "married_to", None)
+    for other_id, rel in rels.items():
+        romance = rel.romance if hasattr(rel, "romance") else rel.get("romance", 0)
+        if romance >= 60 and not married:
+            return Goal(
+                goal_type=GoalType.FIND_ROMANCE,
+                target_sim_id=other_id,
+                priority=0.9,
+                deadline_ticks=120,
+                subgoals=[SubGoal("pursue romance", "romantic", other_id,
+                                  lambda s: getattr(s, "married_to", None) is not None)],
+            )
+
+    # ── 5. Career ambition fallback ────────────────────────────────────────────
     if sim.career_performance > 75 and random.random() < 0.3:
         return Goal(
             goal_type=GoalType.CAREER_ADVANCE,
@@ -285,4 +466,5 @@ def maybe_generate_intention(sim: "Sim", tick: int) -> Goal | None:
             subgoals=[SubGoal("excel at work", "intellectual", "",
                               lambda s: s.career_performance >= 90)],
         )
+
     return None

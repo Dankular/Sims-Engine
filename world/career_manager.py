@@ -272,6 +272,17 @@ class CareerManager:
         level_def = self._get_level_def(sim)
         if level_def and level_def.salary_per_tick > 0:
             bonus = 1.0 + (sim.career_performance - 50.0) / 200.0
+            # Labor market wage pressure adjusts actual take-home pay
+            try:
+                import engine.engine as _em
+                if _em._current_engine and hasattr(_em._current_engine, "macro_economy"):
+                    wp = _em._current_engine.macro_economy.labor.wage_pressure
+                    bonus *= max(0.7, min(1.4, 1.0 + wp * 0.3))
+                if _em._current_engine and hasattr(_em._current_engine, "job_market"):
+                    career = sim.profile.get("job", "")
+                    bonus *= _em._current_engine.job_market.wage_multiplier_for(career)
+            except Exception:
+                pass
             _eng = getattr(sim, '_engine_ref', None)
         if _eng:
             from persistence.ledger import TX_SALARY

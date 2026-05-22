@@ -124,6 +124,19 @@ def get_interaction_context(
     if world_ctx:
         parts.append(f"WORLD SENSOR CONTEXT: {world_ctx}")
 
+    # ── Civilization context: faction + history (engine-provided) ─────────────
+    try:
+        _eng_ref = getattr(sim_a, "_engine_ref", None)
+        if _eng_ref is not None:
+            faction_ctx = _eng_ref.factions.inject_context(sim_a.sim_id, _eng_ref)
+            if faction_ctx:
+                parts.append(f"FACTION: {faction_ctx}")
+            hist_digest = _eng_ref.world_history.digest(last_n=3, location="global")
+            if hist_digest:
+                parts.append(f"WORLD HISTORY: {hist_digest}")
+    except Exception:
+        pass
+
     # ── ATOMIC commonsense ────────────────────────────────────────────────────
     atomic = query_atomic(interaction)
     if atomic:

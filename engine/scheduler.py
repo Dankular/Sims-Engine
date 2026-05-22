@@ -1492,6 +1492,30 @@ def choose_interaction(
         if interruption and not sim_a.is_on_cooldown(interruption, current_tick):
             return interruption
 
+    # Faction collective action bias — members act in concert
+    try:
+        import engine.engine as _eng_mod
+        _eng = getattr(_eng_mod, "_current_engine", None)
+        if _eng is not None and hasattr(_eng, "factions"):
+            faction = _eng.factions.get_sim_faction(sim_a.sim_id)
+            if faction and faction.collective_action:
+                act = faction.collective_action
+                if act == "strike":
+                    candidates.append(("demand fair treatment", 1.3))
+                    candidates.append(("organize collective action", 1.1))
+                    candidates = [(a, w * 0.4) if "work" in a.lower() else (a, w)
+                                  for a, w in candidates]
+                elif act == "campaign":
+                    candidates.append(("share political views", 1.2))
+                    candidates.append(("rally support for cause", 1.0))
+                    candidates.append(("persuade about ideology", 0.9))
+                elif act == "propaganda":
+                    candidates.append(("spread message", 1.1))
+                    candidates = [(a, w * 1.25) if any(k in a for k in ("chat", "compliment", "invite"))
+                                  else (a, w) for a, w in candidates]
+    except Exception:
+        pass
+
     # System 2b: Stage-aware arc weights (tease → disclosure → affectionate_intent)
     candidates = _apply_stage_weights(sim_a, sim_b, relationship, candidates, datasets)
 
@@ -1651,6 +1675,30 @@ def pick_interaction_pair(sims: list["Sim"], relationships: "RelationshipGraph")
             except Exception:
                 pass
 
+            # Spatial proximity — nearby sims interact far more often
+            proximity_bonus = 0.0
+            try:
+                import engine.engine as _eng_mod
+                _eng = getattr(_eng_mod, "_current_engine", None)
+                if _eng is not None and hasattr(_eng, "spatial"):
+                    proximity_bonus = _eng.spatial.proximity_score(
+                        sim_a.sim_id, sim_b.sim_id
+                    ) * 0.25
+            except Exception:
+                pass
+
+            # Social class affinity — same-class pairs gravitate together
+            class_bonus = 0.0
+            try:
+                import engine.engine as _eng_mod
+                _eng = getattr(_eng_mod, "_current_engine", None)
+                if _eng is not None and hasattr(_eng, "social_class"):
+                    class_bonus = _eng.social_class.class_affinity_score(
+                        sim_a.sim_id, sim_b.sim_id
+                    )
+            except Exception:
+                pass
+
             score = (
                 sim_a.want_pressure_toward(sim_b.sim_id) * 0.5
                 + sim_b.want_pressure_toward(sim_a.sim_id) * 0.3
@@ -1661,6 +1709,8 @@ def pick_interaction_pair(sims: list["Sim"], relationships: "RelationshipGraph")
                 + _memory_bias(rel)  # seek those with positive history
                 + attraction_bonus  # chemistry draws compatible sims
                 + club_bonus  # club members prefer each other
+                + proximity_bonus  # location proximity pulls sims together
+                + class_bonus  # same-class affinity / cross-class avoidance
                 + getattr(sim_a, "autonomy_profile", {}).get("social", 0.0) * 0.08
                 - getattr(sim_a, "autonomy_profile", {}).get("solitude", 0.0) * 0.08
                 + (calculate_chemistry(sim_a, sim_b).chemistry / 100.0) * 0.2

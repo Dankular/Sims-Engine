@@ -197,7 +197,10 @@ def create_backend(name: str | None = None) -> LLMBackend:
         return LlamaServerBackend()
     if backend in {"llama-cpp", "llamacpp", "cpp"}:
         return LlamaCppBackend()
-    raise ValueError(f"Unknown LLM backend: {backend!r}. Use 'llama-server' or 'llama-cpp'.")
+    if backend == "mock":
+        from llm.mock_backend import MockLLMBackend
+        return MockLLMBackend()
+    raise ValueError(f"Unknown LLM backend: {backend!r}. Use 'llama-server', 'llama-cpp', or 'mock'.")
 
 
 def create_background_backend(name: str | None = None) -> LLMBackend | None:
