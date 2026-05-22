@@ -441,17 +441,25 @@ class SimEngine:
         from engine.spatial import TravelSystem
         from world.history import WorldChronicle
         from world.demographics import DemographicEngine
+        from world.social_class import SocialClassSystem
+        from world.job_market import JobMarket
+        from world.politics import PoliticalSystem
+        from world.civilization import CivilizationSystem
 
         self.macro_economy  = MacroEconomy()
         self.factions       = FactionManager()
         self.spatial        = TravelSystem()
         self.world_history  = WorldChronicle()
         self.demographics   = DemographicEngine()
+        self.social_class   = SocialClassSystem()
+        self.job_market     = JobMarket()
+        self.politics       = PoliticalSystem()
+        self.civilization   = CivilizationSystem()
 
         # Counter used by GoodsMarket to track aggregate shop visits
         self._shop_visit_count: int = 0
 
-        logger.info("[Engine] Civilization-layer systems initialised (macro/factions/spatial/history/demographics)")
+        logger.info("[Engine] Civilization-layer systems initialised (macro/factions/spatial/history/demographics/class/jobs/politics/civilization)")
 
     # ── Unified financial transaction method ─────────────────────────────────
     #
@@ -839,7 +847,13 @@ class SimEngine:
                 pressures = sim.needs.pressure_vector()
                 for shop in SHOP_DEFS:
                     if pressures.get(shop["need"], 0) > 0.75:
-                        visit_shop(sim, shop, engine=self)
+                        try:
+                            _adj_cost = self.macro_economy.goods.get_adjusted_cost(shop["cost"])
+                            _shop = {**shop, "cost": _adj_cost}
+                        except Exception:
+                            _shop = shop
+                        visit_shop(sim, _shop, engine=self)
+                        self._shop_visit_count += 1
                         break
 
         # Neural planner: object-oriented goal resolution + store acquisition
@@ -1239,6 +1253,22 @@ class SimEngine:
             self.demographics.tick(self)
         except Exception as _de:
             logger.debug("[Demographics] tick error: %s", _de)
+        try:
+            self.social_class.tick(self)
+        except Exception as _sce:
+            logger.debug("[SocialClass] tick error: %s", _sce)
+        try:
+            self.job_market.tick(self)
+        except Exception as _jme:
+            logger.debug("[JobMarket] tick error: %s", _jme)
+        try:
+            self.politics.tick(self)
+        except Exception as _pe:
+            logger.debug("[Politics] tick error: %s", _pe)
+        try:
+            self.civilization.tick(self)
+        except Exception as _cive:
+            logger.debug("[Civilization] tick error: %s", _cive)
 
         # Broadcast compact state diffs to NATS (no-op when offline)
         if self._network:
@@ -1620,6 +1650,10 @@ class SimEngine:
             "spatial": self.spatial.summary(),
             "world_history": self.world_history.summary(),
             "demographics": self.demographics.summary(),
+            "social_class": self.social_class.mobility_summary(),
+            "job_market": self.job_market.summary(),
+            "politics": self.politics.summary(),
+            "civilization": self.civilization.summary(),
         }
 
     def list_pet_catalog(self) -> list[dict]:
@@ -2399,6 +2433,15 @@ class SimEngine:
         try:
             if hasattr(self, "emergence"):
                 self.emergence.record_interaction(item.interaction)
+        except Exception:
+            pass
+
+        # Civilization research & culture accumulation
+        try:
+            if hasattr(self, "civilization"):
+                self.civilization.on_interaction_resolved(
+                    item.interaction, valence, self
+                )
         except Exception:
             pass
 
@@ -6486,7 +6529,9 @@ class SimEngine:
                 continue
             rel = self.relationships.get(parent_a.sim_id, parent_b.sim_id)
             chance = 0.38 if rel.romance >= 80 else 0.22
-            if random.random() < chance:
+            # Demographic birth pressure modulates conception probability
+            birth_mult = getattr(getattr(self, "demographics", None), "birth_pressure", 0.5)
+            if random.random() < chance * birth_mult:
                 self._start_pregnancy(parent_a, parent_b)
             else:
                 parent_a.emotion.add(
