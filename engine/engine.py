@@ -435,6 +435,24 @@ class SimEngine:
 
         logger.info("[Engine] Closed-loop cognition systems initialised")
 
+        # ── Civilization-layer systems (Gap fills 1-6) ────────────────────────
+        from world.macro_economy import MacroEconomy
+        from world.factions import FactionManager
+        from engine.spatial import TravelSystem
+        from world.history import WorldChronicle
+        from world.demographics import DemographicEngine
+
+        self.macro_economy  = MacroEconomy()
+        self.factions       = FactionManager()
+        self.spatial        = TravelSystem()
+        self.world_history  = WorldChronicle()
+        self.demographics   = DemographicEngine()
+
+        # Counter used by GoodsMarket to track aggregate shop visits
+        self._shop_visit_count: int = 0
+
+        logger.info("[Engine] Civilization-layer systems initialised (macro/factions/spatial/history/demographics)")
+
     # ── Unified financial transaction method ─────────────────────────────────
     #
     # _tx() is the SINGLE correct way to change sim.simoleons.
@@ -1200,6 +1218,28 @@ class SimEngine:
         except Exception as _cle:
             logger.debug("[Cognition] tick error: %s", _cle)
 
+        # ── Civilization-layer tick ───────────────────────────────────────────
+        try:
+            self.macro_economy.tick(self)
+        except Exception as _me:
+            logger.debug("[MacroEconomy] tick error: %s", _me)
+        try:
+            self.factions.tick(self)
+        except Exception as _fe:
+            logger.debug("[Factions] tick error: %s", _fe)
+        try:
+            self.spatial.tick(self)
+        except Exception as _se:
+            logger.debug("[Spatial] tick error: %s", _se)
+        try:
+            self.world_history.tick(self)
+        except Exception as _he:
+            logger.debug("[History] tick error: %s", _he)
+        try:
+            self.demographics.tick(self)
+        except Exception as _de:
+            logger.debug("[Demographics] tick error: %s", _de)
+
         # Broadcast compact state diffs to NATS (no-op when offline)
         if self._network:
             self._network.publish_states(
@@ -1574,6 +1614,12 @@ class SimEngine:
             "stocks": self.stocks.state(),
             "tokens": self.tokens.state(),
             "bookie": self.bookie.state(),
+            # ── Civilization layer ────────────────────────────────────────────
+            "macro_economy": self.macro_economy.summary(),
+            "factions": self.factions.summary(),
+            "spatial": self.spatial.summary(),
+            "world_history": self.world_history.summary(),
+            "demographics": self.demographics.summary(),
         }
 
     def list_pet_catalog(self) -> list[dict]:
@@ -2994,6 +3040,19 @@ class SimEngine:
             from narrative.marriage import marry
 
             marry(sim_a, sim_b, self)
+            try:
+                _district = getattr(self.spatial, "_sim_districts", {}).get(sim_a.sim_id, "global")
+                self.world_history.record(
+                    tick=self._tick_count,
+                    event_type="marriage",
+                    description=f"{sim_a.name} and {sim_b.name} were married.",
+                    participants=[sim_a.sim_id, sim_b.sim_id],
+                    location=_district,
+                    impact=0.6,
+                    tags=["romance", "milestone"],
+                )
+            except Exception:
+                pass
 
         if (
             (
@@ -3042,6 +3101,41 @@ class SimEngine:
             interaction_id=item.interaction_id,
             interaction=item.interaction,
         )
+
+        # ── World history: record significant interaction moments ─────────────
+        try:
+            _abs_v = abs(valence)
+            if _abs_v >= 0.7 or abs(fd) >= 20 or abs(rd) >= 15:
+                _district = getattr(
+                    self.spatial, "_sim_districts", {}
+                ).get(sim_a.sim_id, "global")
+                _tags: list[str] = []
+                if rd >= 15:
+                    _tags.append("romance")
+                if fd <= -20:
+                    _tags.append("conflict")
+                if fd >= 20:
+                    _tags.append("friendship")
+                if valence < -0.7:
+                    _tags.append("tragedy")
+                self.world_history.record(
+                    tick=self._tick_count,
+                    event_type="notable_interaction",
+                    description=(
+                        f"{sim_a.name} and {sim_b.name}: "
+                        f"{item.interaction[:80]} (Δfriend={fd:+.0f}, Δromance={rd:+.0f})"
+                    ),
+                    participants=[sim_a.sim_id, sim_b.sim_id],
+                    location=_district,
+                    impact=valence * 0.3,
+                    tags=_tags,
+                )
+        except Exception:
+            pass
+
+        # ── Shop visit counter for GoodsMarket ───────────────────────────────
+        if "shop" in item.interaction.lower() or "buy" in item.interaction.lower():
+            self._shop_visit_count += 1
 
     def _trait_evolution_tick(self, sim: "Sim", text_hint: str, valence: float) -> None:
         hint = text_hint.lower()
